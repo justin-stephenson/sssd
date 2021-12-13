@@ -186,6 +186,9 @@ void sss_log(int priority, const char *format, ...) SSS_ATTRIBUTE_PRINTF(2, 3);
 void sss_log_ext(int priority, int facility, const char *format, ...) SSS_ATTRIBUTE_PRINTF(3, 4);
 
 /* from server.c */
+#define DEBUG_CHAIN_ID_FMT_RID "[RID#%lu] "
+#define DEBUG_CHAIN_ID_FMT_CID "[CID#%lu] "
+
 struct main_context {
     struct tevent_context *event_ctx;
     struct confdb_ctx *confdb_ctx;
