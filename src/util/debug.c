@@ -36,8 +36,6 @@
 
 #include "util/util.h"
 
-#define DEBUG_CHAIN_ID_FMT "[RID#%lu] "
-
 /* from debug_backtrace.h */
 void sss_debug_backtrace_init(void);
 void sss_debug_backtrace_vprintf(int level, const char *format, va_list ap);
@@ -53,6 +51,10 @@ enum sss_logger_t sss_logger = STDERR_LOGGER;
 const char *debug_log_file = "sssd";
 FILE *_sss_debug_file;
 uint64_t debug_chain_id;
+/* Default value says 'BUG' because this is just a precautionary measure and
+ * it is expected value is always set explicitly by every SSSD process. 'BUG'
+ * should make any potential oversight more prominent in the logs. */
+const char *debug_chain_id_fmt = "BUG%lu";
 
 const char *sss_logger_str[] = {
         [STDERR_LOGGER] = "stderr",
@@ -276,6 +278,7 @@ void sss_vdebug_fn(const char *file,
     time_t t;
 
 #ifdef WITH_JOURNALD
+    static char combined_fmt[32];
     char chain_id_fmt_fixed[256];
     char *chain_id_fmt_dyn = NULL;
     char *result_fmt;
@@ -292,15 +295,21 @@ void sss_vdebug_fn(const char *file,
          * searchable.
          */
         va_copy(ap_fallback, ap);
-        if (debug_chain_id > 0) {
+        if (debug_chain_id > 0 && debug_chain_id_fmt != NULL) {
+            ret = snprintf(combined_fmt, sizeof(combined_fmt), "%s%%s", debug_chain_id_fmt);
+            if (ret < 0 || ret >= sizeof(combined_fmt)) {
+                va_end(ap_fallback);
+                return;
+            }
+
             result_fmt = chain_id_fmt_fixed;
             ret = snprintf(chain_id_fmt_fixed, sizeof(chain_id_fmt_fixed),
-                           DEBUG_CHAIN_ID_FMT"%s", debug_chain_id, format);
+                           combined_fmt, debug_chain_id, format);
             if (ret < 0) {
                 va_end(ap_fallback);
                 return;
             } else if (ret >= sizeof(chain_id_fmt_fixed)) {
-                ret = asprintf(&chain_id_fmt_dyn, DEBUG_CHAIN_ID_FMT"%s",
+                ret = asprintf(&chain_id_fmt_dyn, combined_fmt,
                                debug_chain_id, format);
                 if (ret < 0) {
                     va_end(ap_fallback);
@@ -350,8 +359,8 @@ void sss_vdebug_fn(const char *file,
     sss_debug_backtrace_printf(level, "[%s] [%s] (%#.4x): ",
                                debug_prg_name, function, level);
 
-    if (debug_chain_id > 0) {
-        sss_debug_backtrace_printf(level, DEBUG_CHAIN_ID_FMT, debug_chain_id);
+    if (debug_chain_id > 0 && debug_chain_id_fmt != NULL) {
+        sss_debug_backtrace_printf(level, debug_chain_id_fmt, debug_chain_id);
     }
 
     sss_debug_backtrace_vprintf(level, format, ap);

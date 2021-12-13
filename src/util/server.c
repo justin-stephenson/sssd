@@ -33,6 +33,8 @@
 #include <ldb.h>
 #include "util/util.h"
 #include "confdb/confdb.h"
+#include "util/sss_chain_id.h"
+#include "util/sss_chain_id_tevent.h"
 
 #ifdef HAVE_PRCTL
 #include <sys/prctl.h>
@@ -451,7 +453,8 @@ static const char *get_pid_path(void)
 #endif
 }
 
-int server_setup(const char *name, int flags,
+int server_setup(const char *name,
+                 int flags,
                  uid_t uid, gid_t gid,
                  const char *conf_entry,
                  struct main_context **main_ctx)
