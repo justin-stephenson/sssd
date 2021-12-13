@@ -200,7 +200,8 @@ errno_t server_common_rotate_logs(struct confdb_ctx *confdb,
 int die_if_parent_died(void);
 int check_pidfile(const char *file);
 int pidfile(const char *file);
-int server_setup(const char *name, int flags,
+int server_setup(const char *name, bool is_responder,
+                 int flags,
                  uid_t uid, gid_t gid,
                  const char *conf_entry,
                  struct main_context **main_ctx);
