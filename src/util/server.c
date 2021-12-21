@@ -33,6 +33,7 @@
 #include <ldb.h>
 #include "util/util.h"
 #include "confdb/confdb.h"
+#include "util/sss_chain_id.h"
 #include "util/sss_chain_id_tevent.h"
 
 #ifdef HAVE_PRCTL
@@ -474,6 +475,12 @@ int server_setup(const char *name, bool is_responder,
     char *pidfile_name;
     int cfg_debug_level = SSSDBG_INVALID;
 
+    if (is_responder) {
+        sss_chain_id_set_format(DEBUG_CHAIN_ID_FMT_CID);
+    } else {
+        sss_chain_id_set_format(DEBUG_CHAIN_ID_FMT_RID);
+    }
+
     autofree_ctx = talloc_named_const(NULL, 0, "autofree_context");
     if (autofree_ctx == NULL) {
         return ENOMEM;
@@ -705,11 +712,7 @@ int server_setup(const char *name, bool is_responder,
         }
     }
 
-    if (is_responder) {
-        sss_chain_id_setup(ctx->event_ctx, DEBUG_CHAIN_ID_FMT_CID);
-    } else {
-        sss_chain_id_setup(ctx->event_ctx, DEBUG_CHAIN_ID_FMT_RID);
-    }
+    sss_chain_id_setup(ctx->event_ctx);
 
     sss_log(SSS_LOG_INFO, "Starting up");
 

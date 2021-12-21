@@ -24,7 +24,6 @@
 #include <stdint.h>
 
 extern uint64_t debug_chain_id;
-extern const char *debug_chain_id_fmt;
 
 /* Explicitly set new chain id. The old id is returned. */
 uint64_t sss_chain_id_set(uint64_t id);

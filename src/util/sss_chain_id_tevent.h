@@ -24,7 +24,6 @@
 #include <tevent.h>
 
 /* Setup chain id tracking on tevent context. */
-void sss_chain_id_setup(struct tevent_context *ev,
-                        const char *fmt);
+void sss_chain_id_setup(struct tevent_context *ev);
 
 #endif /* _SSS_CHAIN_ID_TEVENT_ */

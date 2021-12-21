@@ -21,6 +21,9 @@
 #include <stdint.h>
 #include "util/sss_chain_id.h"
 
+extern const char *debug_chain_id_fmt;
+
+#ifdef BUILD_CHAIN_ID
 void sss_chain_id_set_format(const char *fmt)
 {
     debug_chain_id_fmt = fmt;
@@ -37,3 +40,21 @@ uint64_t sss_chain_id_get(void)
 {
     return debug_chain_id;
 }
+#else /* BUILD_CHAIN_ID not defined */
+
+void sss_chain_id_set_format(const char *fmt)
+{
+    return;
+}
+
+uint64_t sss_chain_id_set(uint64_t id)
+{
+    return 0;
+}
+
+uint64_t sss_chain_id_get(void)
+{
+    return 0;
+}
+
+#endif /* BUILD_CHAIN_ID */

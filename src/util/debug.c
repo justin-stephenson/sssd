@@ -51,7 +51,7 @@ enum sss_logger_t sss_logger = STDERR_LOGGER;
 const char *debug_log_file = "sssd";
 FILE *_sss_debug_file;
 uint64_t debug_chain_id;
-const char *debug_chain_id_fmt = "[?ID#%lu] ";
+const char *debug_chain_id_fmt = "BUG%lu";
 
 const char *sss_logger_str[] = {
         [STDERR_LOGGER] = "stderr",
@@ -292,7 +292,7 @@ void sss_vdebug_fn(const char *file,
          * searchable.
          */
         va_copy(ap_fallback, ap);
-        if (debug_chain_id > 0) {
+        if (debug_chain_id > 0 && debug_chain_id_fmt != NULL) {
             strncpy(combined_fmt, debug_chain_id_fmt, sizeof(combined_fmt) - 1);
             strcat(combined_fmt, "%s");
 
@@ -353,7 +353,7 @@ void sss_vdebug_fn(const char *file,
     sss_debug_backtrace_printf(level, "[%s] [%s] (%#.4x): ",
                                debug_prg_name, function, level);
 
-    if (debug_chain_id > 0) {
+    if (debug_chain_id > 0 && debug_chain_id_fmt != NULL) {
         sss_debug_backtrace_printf(level, debug_chain_id_fmt, debug_chain_id);
     }
 
