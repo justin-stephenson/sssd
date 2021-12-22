@@ -453,7 +453,7 @@ static const char *get_pid_path(void)
 #endif
 }
 
-int server_setup(const char *name,
+int server_setup(const char *name, bool is_responder,
                  int flags,
                  uid_t uid, gid_t gid,
                  const char *conf_entry,
@@ -474,6 +474,12 @@ int server_setup(const char *name,
     pid_t my_pid;
     char *pidfile_name;
     int cfg_debug_level = SSSDBG_INVALID;
+
+    if (is_responder) {
+        sss_chain_id_set_format(DEBUG_CHAIN_ID_FMT_CID);
+    } else {
+        sss_chain_id_set_format(DEBUG_CHAIN_ID_FMT_RID);
+    }
 
     autofree_ctx = talloc_named_const(NULL, 0, "autofree_context");
     if (autofree_ctx == NULL) {
@@ -705,6 +711,8 @@ int server_setup(const char *name,
             return ret;
         }
     }
+
+    sss_chain_id_setup(ctx->event_ctx);
 
     sss_log(SSS_LOG_INFO, "Starting up");
 
