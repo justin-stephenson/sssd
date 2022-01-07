@@ -882,15 +882,15 @@ void sss_set_sssd_user_eid(void)
 
     if (geteuid() == 0) {
         sss_sssd_user_uid_and_gid(&uid, &gid);
-        if (seteuid(uid) != EOK) {
-            DEBUG(SSSDBG_MINOR_FAILURE,
-                  "Failed to set euid to %"SPRIuid": %s\n",
-                  uid, sss_strerror(errno));
-        }
         if (setegid(gid) != EOK) {
             DEBUG(SSSDBG_MINOR_FAILURE,
                   "Failed to set egid to %"SPRIgid": %s\n",
                   gid, sss_strerror(errno));
+        }
+        if (seteuid(uid) != EOK) {
+            DEBUG(SSSDBG_MINOR_FAILURE,
+                  "Failed to set euid to %"SPRIuid": %s\n",
+                  uid, sss_strerror(errno));
         }
     }
 }
