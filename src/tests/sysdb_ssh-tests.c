@@ -53,6 +53,8 @@ static int setup_sysdb_tests(struct sysdb_test_ctx **ctx)
     const char *val[2];
     val[1] = NULL;
 
+    sss_set_sssd_user_eid();
+
     /* Create tests directory if it doesn't exist */
     /* (relative to current dir) */
     ret = mkdir(TESTS_PATH, 0775);
@@ -60,6 +62,8 @@ static int setup_sysdb_tests(struct sysdb_test_ctx **ctx)
         ck_abort_msg("Could not create %s directory", TESTS_PATH);
         return EFAULT;
     }
+
+    sss_restore_sssd_user_eid();
 
     test_ctx = talloc_zero(NULL, struct sysdb_test_ctx);
     if (test_ctx == NULL) {

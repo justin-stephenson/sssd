@@ -2348,6 +2348,7 @@ debug_tests_CFLAGS = \
     $(CHECK_CFLAGS)
 debug_tests_LDADD = \
     $(SSSD_LIBS) \
+    $(SSSD_INTERNAL_LTLIBS) \
     $(CHECK_LIBS) \
     libsss_debug.la
 
@@ -2708,6 +2709,7 @@ test_io_SOURCES = \
 test_io_CFLAGS = \
     $(AM_CFLAGS)
 test_io_LDADD = \
+    $(SSSD_INTERNAL_LTLIBS) \
     $(CMOCKA_LIBS)
 
 EXTRA_test_negcache_DEPENDENCIES = \

@@ -76,6 +76,8 @@ static int _setup_sysdb_tests(struct sysdb_test_ctx **ctx, bool enumerate)
     const char *val[2];
     val[1] = NULL;
 
+    sss_set_sssd_user_eid();
+
     /* Create tests directory if it doesn't exist */
     /* (relative to current dir) */
     ret = mkdir(TESTS_PATH, 0775);
@@ -83,6 +85,8 @@ static int _setup_sysdb_tests(struct sysdb_test_ctx **ctx, bool enumerate)
         ck_abort_msg("Could not create %s directory", TESTS_PATH);
         return EFAULT;
     }
+
+    sss_restore_sssd_user_eid();
 
     test_ctx = talloc_zero(NULL, struct sysdb_test_ctx);
     if (test_ctx == NULL) {
@@ -6839,6 +6843,8 @@ static struct confdb_ctx *test_cdb_domains_prep(TALLOC_CTX *mem_ctx)
     int ret;
     struct confdb_ctx *confdb;
 
+    sss_set_sssd_user_eid();
+
     /* Create tests directory if it doesn't exist */
     /* (relative to current dir) */
     ret = mkdir(TESTS_PATH, 0775);
@@ -6846,6 +6852,8 @@ static struct confdb_ctx *test_cdb_domains_prep(TALLOC_CTX *mem_ctx)
         ck_abort_msg("Could not create %s directory", TESTS_PATH);
         return NULL;
     }
+
+    sss_restore_sssd_user_eid();
 
     conf_db = talloc_asprintf(mem_ctx, "%s/%s", TESTS_PATH, TEST_CONF_FILE);
     ck_assert(conf_db != NULL);
