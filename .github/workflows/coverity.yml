@@ -16,6 +16,10 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v2
 
+    - name: Install packages to build srpm
+    run: |
+      sudo dnf install -y rpm-build
+
     - name: Generate tarball and spec file
       shell: bash
       run: |
