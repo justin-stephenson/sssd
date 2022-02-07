@@ -16,31 +16,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Install packages to build srpm
+      - name: Generate spec file
         run: |
-          sudo dnf install -y rpm-build dnf-plugins-core
-
-      - name: Generate tarball and spec file
-        run: |
-          NAME=sssd-$BUILD_NAME
-          tar -cvzf $NAME.tar.gz --transform "s,^,$NAME/," *
-
           cp contrib/sssd.spec.in ./sssd.spec
 
           sed -iE "s/@PACKAGE_NAME@/sssd/g" ./sssd.spec
-          sed -iE "s/@PACKAGE_VERSION@/$BUILD_NAME/g" ./sssd.spec
+          sed -iE "s/@PACKAGE_VERSION@/covscan/g" ./sssd.spec
           sed -iE "s/@PRERELEASE_VERSION@/$GITHUB_RUN_NUMBER/g" ./sssd.spec
-
-      - name: Build source rpm
-        id: srpm
-        uses: SSSD/action-build-srpm@master
-        with:
-          tarball: sssd-$BUILD_NAME.tar.gz
-          specfile: sssd.spec
 
       - name: Install dependencies
         run: |
-          sudo dnf builddep -y ${{ steps.srpm.outputs.file }}
+          sudo dnf builddep --spec sssd.spec
 
       - name: Configure
         run: autoreconf -if && ./configure
