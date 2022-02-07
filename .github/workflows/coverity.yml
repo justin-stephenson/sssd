@@ -1,0 +1,54 @@
+name: Coverity scan
+on:
+  # run once daily at 12:30 UTC due to
+  # https://scan.coverity.com/faq#frequency
+  schedule:
+    - cron:  '* * * * *'
+    #- cron:  '30 12 * * *'
+
+jobs:
+  coverity:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    env:
+      BUILD_NAME: 'covscan'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Install packages to build srpm
+      run: |
+        sudo dnf install -y rpm-build
+
+    - name: Generate tarball and spec file
+      shell: bash
+      run: |
+        NAME=sssd-$BUILD_NAME
+        tar -cvzf $NAME.tar.gz --transform "s,^,$NAME/," *
+
+        cp contrib/sssd.spec.in ./sssd.spec
+
+        sed -iE "s/@PACKAGE_NAME@/sssd/g" ./sssd.spec
+        sed -iE "s/@PACKAGE_VERSION@/$BUILD_NAME/g" ./sssd.spec
+        sed -iE "s/@PRERELEASE_VERSION@/$GITHUB_RUN_NUMBER/g" ./sssd.spec
+
+    - name: Build source rpm
+      id: srpm
+      uses: SSSD/action-build-srpm@master
+      with:
+        tarball: sssd-$BUILD_NAME.tar.gz
+        specfile: sssd.spec
+
+    - name: Install dependencies
+      run: |
+       sudo dnf builddep -y ${{ steps.srpm.outputs.file }}
+
+    - name: Configure
+      run: autoreconf -if && ./configure
+
+    - name: Execute and submit coverity scan
+      uses: vapier/coverity-scan-action@v1
+      with:
+        ## FIXME: Email, and check for token in sssd repo
+        email: 'jstephen@redhat.com'
+        token: ${{ secrets.COVERITY_SCAN_TOKEN }}
