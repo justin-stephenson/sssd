@@ -26,7 +26,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo dnf builddep --spec sssd.spec
+          sudo dnf -y install dnf-plugins-core
+          sudo dnf -y builddep --spec sssd.spec
 
       - name: Configure
         run: autoreconf -if && ./configure
