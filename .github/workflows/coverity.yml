@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     container: fedora:latest
     env:
-      BUILD_NAME: 'ext-scan'
+      BUILD_NAME: 'covscan'
     steps:
     - name: Checkout repository
       uses: actions/checkout@v2
