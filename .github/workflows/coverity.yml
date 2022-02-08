@@ -36,6 +36,9 @@ jobs:
         ## Remove make
         run: |
           source ./contrib/fedora/bashrc_sssd && reconfig
+          pwd
+          ls -l
+          ls -l ../
 
       - name: Execute and submit coverity scan
         uses: vapier/coverity-scan-action@v1
