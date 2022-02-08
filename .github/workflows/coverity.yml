@@ -32,15 +32,8 @@ jobs:
           sudo dnf -y install dnf-plugins-core wget
           sudo dnf -y builddep --spec sssd.spec
 
-      - name: Configure
-        ## Remove make
-        run: |
-          source ./contrib/fedora/bashrc_sssd && reconfig
-
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-
-      - name: Execute and submit coverity scan
+      - name: Configure, execute, and submit coverity scan
+        runs: source ./contrib/fedora/bashrc_sssd && reconfig
         uses: vapier/coverity-scan-action@v1
         with:
           ## FIXME: Email, and check for token in sssd repo
