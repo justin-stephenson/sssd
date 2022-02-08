@@ -30,7 +30,8 @@ jobs:
           sudo dnf -y builddep --spec sssd.spec
 
       - name: Configure
-        run: autoreconf -if && ./configure
+        ## Remove make
+        run: autoreconf -if && ./configure && make
 
       - name: Execute and submit coverity scan
         uses: vapier/coverity-scan-action@v1
