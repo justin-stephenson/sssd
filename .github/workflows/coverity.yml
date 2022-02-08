@@ -35,7 +35,7 @@ jobs:
       - name: Configure
         ## Remove make
         run: |
-          source ./contrib/fedora/bashrc_sssd && reconfig && make
+          source ./contrib/fedora/bashrc_sssd && reconfig
 
       - name: Execute and submit coverity scan
         uses: vapier/coverity-scan-action@v1
