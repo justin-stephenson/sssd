@@ -32,8 +32,10 @@ jobs:
           sudo dnf -y install dnf-plugins-core wget
           sudo dnf -y builddep --spec sssd.spec
 
-      - name: Configure, execute, and submit coverity scan
+      - name: Configure
         run: source ./contrib/fedora/bashrc_sssd && reconfig
+
+      - name: Execute and submit coverity scan
         uses: vapier/coverity-scan-action@v1
         with:
           ## FIXME: Email, and check for token in sssd repo
