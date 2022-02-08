@@ -26,7 +26,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo dnf -y install dnf-plugins-core wget krb5-libs
+          sudo dnf -y update
+          sudo dnf -y install dnf-plugins-core wget
           sudo dnf -y builddep --spec sssd.spec
 
       - name: Configure
