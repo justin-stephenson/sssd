@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     # FIXME: fedora:latest fails due to
     # https://bugzilla.redhat.com/show_bug.cgi?id=2048909
-    container: fedora:35
+    container: fedora:34
     env:
       BUILD_NAME: "covscan"
     steps:
