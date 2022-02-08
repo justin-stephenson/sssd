@@ -33,7 +33,7 @@ jobs:
           sudo dnf -y builddep --spec sssd.spec
 
       - name: Configure, execute, and submit coverity scan
-        runs: source ./contrib/fedora/bashrc_sssd && reconfig
+        run: source ./contrib/fedora/bashrc_sssd && reconfig
         uses: vapier/coverity-scan-action@v1
         with:
           ## FIXME: Email, and check for token in sssd repo
