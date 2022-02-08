@@ -36,9 +36,9 @@ jobs:
         ## Remove make
         run: |
           source ./contrib/fedora/bashrc_sssd && reconfig
-          pwd
-          ls -l
-          ls -l ../
+
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
 
       - name: Execute and submit coverity scan
         uses: vapier/coverity-scan-action@v1
