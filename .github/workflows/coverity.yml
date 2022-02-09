@@ -36,7 +36,7 @@ jobs:
         run: source ./contrib/fedora/bashrc_sssd && reconfig
 
       - name: Execute and submit coverity scan
-        uses: justin-stephenson/coverity-scan-action@v1
+        uses: justin-stephenson/coverity-scan-action@v1.1
         with:
           ## FIXME: Email, and check for token in sssd repo
           email: "jstephen@redhat.com"
