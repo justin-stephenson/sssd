@@ -37,7 +37,7 @@ jobs:
 
       - name: Execute and submit coverity scan
         working-directory: ./x86_64
-        uses: vapier/coverity-scan-action@v1
+        uses: justin-stephenson/coverity-scan-action@v1
         with:
           ## FIXME: Email, and check for token in sssd repo
           email: "jstephen@redhat.com"
