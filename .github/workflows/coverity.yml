@@ -41,3 +41,4 @@ jobs:
           ## FIXME: Email, and check for token in sssd repo
           email: "jstephen@redhat.com"
           token: ${{ secrets.COVERITY_SCAN_TOKEN }}
+          working_directory: x86_64
