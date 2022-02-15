@@ -313,7 +313,7 @@ class Covscan extends Test {
 
   def run() {
     def version = this.pr_number ? this.pr_number : this.branch.trim()
-    def codedir = "${this.pipeline.env.WORKSPACE}/sssd"
+    def workspace = "${this.pipeline.env.WORKSPACE}"
     this.pipeline.echo "Executing covscan script with version: pr${version}_${this.pipeline.env.BUILD_ID}"
 
     def command = String.format(
@@ -322,7 +322,7 @@ class Covscan extends Test {
       this.pr_number ? "pr" : "",
       version,
       this.pipeline.env.BUILD_ID,
-      codedir,
+      workspace,
     )
 
     super.run(command)
@@ -478,7 +478,7 @@ try {
     /* Run covscan against non-test related PRs */
     if ((with_tests_label == false) && (with_tests_title == false)) {
       stages.put("covscan", {
-        node("sssd-ci") {
+        node("sssd-ci-09") {
           stage("covscan") {
             covscan = new Covscan(this, notification, params.REPO_URL, params.REPO_BRANCH, env.CHANGE_ID, on_demand)
             covscan.run()
