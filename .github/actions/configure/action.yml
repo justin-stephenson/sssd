@@ -1,0 +1,12 @@
+name: 'Configure SSSD'
+description: 'Configure SSSD'
+runs:
+  using: "composite"
+  steps:
+  - shell: bash
+    run: |
+      source contrib/fedora/bashrc_sssd
+      cd contrib/ci/
+      . configure.sh
+      cd ../..
+      reconfig "${CONFIGURE_ARG_LIST[@]}"
