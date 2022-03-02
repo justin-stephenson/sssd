@@ -10,9 +10,8 @@ SSS_ARCH=$(uname -m)
 SSS_LIB=$(rpm --eval %{_lib})
 SSS_LIBDIR=$(rpm --eval %{_libdir})
 
-# Add the following line to your .bashrc if you want SSSD to throw errors on
-# compiler warnings (recommended)
-# SSS_WERROR=-Werror
+# Error on compiler warnings (recommended)
+SSS_WERROR=-Werror
 
 # Determine the number of available processors on the system for parallel make
 # invocation.
