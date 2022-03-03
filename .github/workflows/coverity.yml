@@ -4,6 +4,7 @@ on:
   # https://scan.coverity.com/faq#frequency
   schedule:
     - cron: "30 0 * * *"
+  workflow_dispatch:
 
 jobs:
   coverity:
@@ -11,6 +12,10 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v2
+
+    - name: Update first
+      run: |
+        sudo apt-get update
 
     - name: Install dependencies
       uses: ./.github/actions/install-dependencies
