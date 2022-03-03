@@ -5,6 +5,18 @@ runs:
   steps:
   - shell: bash
     run: |
+      echo "OS_NAME=$(grep '^ID=' /etc/os-release)" >> $GITHUB_ENV
+
+  # Ensure updated apt cache. This avoids errors such as
+  # Failed to fetch
+  # http://azure.archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6-dbg_2.31-0ubuntu9.2_amd64.deb
+  # 404  Not Found...
+  - shell: bash
+    if: contains(env.OS_NAME, 'ubuntu')
+    run: sudo apt-get update
+
+  - shell: bash
+    run: |
       cd contrib/ci/
       . deps.sh
       deps_install
