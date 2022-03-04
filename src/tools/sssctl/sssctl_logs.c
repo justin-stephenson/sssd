@@ -397,7 +397,7 @@ errno_t sssctl_analyze(struct sss_cmdline *cmdline,
 #ifndef BUILD_CHAIN_ID
     PRINT("ERROR: Tevent chain ID support missing, log analyzer is unsupported.\n");
     return EOK;
-#endif
+#else
     errno_t ret;
 
     const char **args = talloc_array_size(tool_ctx,
@@ -415,4 +415,5 @@ errno_t sssctl_analyze(struct sss_cmdline *cmdline,
     talloc_free(args);
 
     return ret;
+#endif
 }
