@@ -229,36 +229,42 @@ static errno_t dispatch_event(struct snotify_ctx *snctx,
 }
 
 static errno_t process_dir_event(struct snotify_ctx *snctx,
-                                 const struct inotify_event *in_event)
+                                 struct inotify_event *in_event)
 {
     errno_t ret;
 
-    DEBUG(SSSDBG_TRACE_ALL, "inotify name: %s\n", in_event->name);
-    if (in_event->len == 0 \
-            || strcmp(in_event->name, snctx->base_name) != 0) {
-        DEBUG(SSSDBG_TRACE_FUNC, "Not interested in %s\n", in_event->name);
-        return EOK;
-    }
+    if (in_event->len > 0 && in_event->len < PATH_MAX) {
+        in_event->name[in_event->len - 1] = '\0';
 
-    DEBUG(SSSDBG_TRACE_FUNC,
-          "received notification for watched file [%s] under %s\n",
-          in_event->name, snctx->dir_name);
+        DEBUG(SSSDBG_TRACE_ALL, "inotify name: %s\n", in_event->name);
+        if (strcmp(in_event->name, snctx->base_name) != 0) {
+            DEBUG(SSSDBG_TRACE_FUNC, "Not interested in %s\n", in_event->name);
+            return EOK;
+        }
 
-    /* file the event for the file to see if the caller is interested in it */
-    ret = dispatch_event(snctx, in_event->mask);
-    if (ret == EOK) {
-        /* Tells the outer loop to re-initialize flags once the loop is finished.
-         * However, finish reading all the events first to make sure we don't
-         * miss any
-         */
-        return EAGAIN;
+        DEBUG(SSSDBG_TRACE_FUNC,
+              "received notification for watched file [%s] under %s\n",
+              in_event->name, snctx->dir_name);
+
+        /* file the event for the file to see if the caller is interested in it */
+        ret = dispatch_event(snctx, in_event->mask);
+        if (ret == EOK) {
+            /* Tells the outer loop to re-initialize flags once the loop is finished.
+             * However, finish reading all the events first to make sure we don't
+             * miss any
+             */
+            return EAGAIN;
+        }
+    } else {
+        DEBUG(SSSDBG_TRACE_FUNC, "Unexpected len size returned, ignoring event\n");
+        ret = EOK;
     }
 
     return ret;
 }
 
 static errno_t process_file_event(struct snotify_ctx *snctx,
-                                  const struct inotify_event *in_event)
+                                  struct inotify_event *in_event)
 {
     if (in_event->mask & IN_IGNORED) {
         DEBUG(SSSDBG_TRACE_FUNC,
@@ -281,8 +287,8 @@ static void snotify_internal_cb(struct tevent_context *ev,
                                 void *data)
 {
     char ev_buf[sizeof(struct inotify_event) + PATH_MAX];
-    const char *ptr;
-    const struct inotify_event *in_event;
+    char *ptr;
+    struct inotify_event *in_event;
     struct snotify_ctx *snctx;
     ssize_t len;
     errno_t ret;
@@ -317,7 +323,7 @@ static void snotify_internal_cb(struct tevent_context *ev,
              ptr < ev_buf + len;
              ptr += sizeof(struct inotify_event) + in_event->len) {
 
-            in_event = (const struct inotify_event *) ptr;
+            in_event = (struct inotify_event *) ptr;
 
 #if 0
             debug_flags(in_event->mask, in_event->name);
