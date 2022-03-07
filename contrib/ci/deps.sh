@@ -16,6 +16,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+RPM_SPEC_BUILDDEPS=$(dirname "${BASH_SOURCE[0]}")/rpm-spec-builddeps
+SPEC_FILE_IN=$(realpath ../../contrib/sssd.spec.in)
+
 if [ -z ${_DEPS_SH+set} ]; then
 declare -r _DEPS_SH=
 
@@ -93,8 +96,8 @@ if [[ "$DISTRO_BRANCH" == -redhat-* ]]; then
     _DEPS_LIST_SPEC=`
         sed -e 's/@PACKAGE_VERSION@/0/g' \
             -e 's/@PACKAGE_NAME@/package-name/g' \
-            -e 's/@PRERELEASE_VERSION@//g' contrib/sssd.spec.in |
-            rpm-spec-builddeps /dev/stdin`
+            -e 's/@PRERELEASE_VERSION@//g' "$SPEC_FILE_IN" |
+            "$RPM_SPEC_BUILDDEPS" /dev/stdin`
     readarray -t -O "${#DEPS_LIST[@]}" DEPS_LIST <<<"$_DEPS_LIST_SPEC"
 fi
 

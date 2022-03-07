@@ -35,19 +35,48 @@ else
 fi
 declare -r DISTRO_FAMILY
 
-DISTRO_ID=`lsb_release --id | sed -e 's/^[^:]*:\s*\(.*\)$/\L\1\E/'`
+. /etc/os-release
+DISTRO_ID=$ID
 declare -r DISTRO_ID
-DISTRO_RELEASE=`lsb_release --release | sed -e 's/^[^:]*:\s*\(.*\)$/\L\1\E/'`
+DISTRO_RELEASE=$VERSION_ID
 declare -r DISTRO_RELEASE
+
+if [ -f /.dockerenv ]; then
+    IN_CONTAINER=true
+fi
 
 # Distribution branch (lowercase)
 declare -r DISTRO_BRANCH="-$DISTRO_FAMILY-$DISTRO_ID-$DISTRO_RELEASE-"
 
+function container_pre_install()
+{
+    echo "Pre-installing any required packages for containers on: "
+    case $DISTRO_ID in
+        fedora)
+          echo "Fedora distro"
+          dnf install -y git
+          ;;
+        ubuntu | debian)
+          echo "Debian based distro"
+          echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+          DEBIAN_FRONTEND=noninteractive apt-get --yes update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y dialog sudo rpm git
+          ;;
+        *)
+          echo "Unknown distro, skipping"
+          ;;
+    esac
+}
 
 # Install packages.
 # Args: [pkg_name...]
 function distro_pkg_install()
 {
+    # install container pre-requisites
+    if [ -n "$IN_CONTAINER" ]; then
+        container_pre_install
+    fi
+
     declare prompt=$'Need root permissions to install packages.\n'
     prompt+="Enter sudo password for $USER: "
     if [[ "$DISTRO_BRANCH" == -redhat-fedora-2[2-5]* ]]; then
