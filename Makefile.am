@@ -188,6 +188,7 @@ if BUILD_SEMANAGE
 sssdlibexec_PROGRAMS += selinux_child
 endif
 sssdlibexec_PROGRAMS += p11_child
+sssdlibexec_PROGRAMS += fido2_child
 if BUILD_OIDC_CHILD
 sssdlibexec_PROGRAMS += oidc_child
 endif
@@ -298,6 +299,7 @@ if HAVE_CMOCKA
         test_sssd_krb5_locator_plugin \
         test_confdb \
         test_krb5_idp_plugin \
+        test_fido2 \
         $(NULL)
 
 
@@ -909,6 +911,7 @@ dist_noinst_HEADERS = \
     src/shared/safealign.h \
     src/p11_child/p11_child.h \
     src/oidc_child/oidc_child_util.h \
+    src/fido2_child/fido2_child.h \
     $(NULL)
 
 
@@ -3780,6 +3783,21 @@ test_sssd_krb5_locator_plugin_LDADD = \
     libsss_test_common.la \
     $(NULL)
 
+test_fido2_SOURCES = \
+    src/fido2_child/fido2_child_common.c \
+    src/tests/cmocka/test_fido2_child.c \
+    $(NULL)
+test_fido2_CFLAGS = \
+    $(AM_CFLAGS) \
+    $(NULL)
+test_fido2_LDADD = \
+    $(CMOCKA_LIBS) \
+    $(SSSD_LIBS) \
+    $(SSSD_INTERNAL_LTLIBS) \
+    $(LIBADD_DL) \
+    libsss_test_common.la \
+    $(NULL)
+
 if BUILD_KCM
 test_kcm_marshalling_SOURCES = \
     src/tests/cmocka/test_kcm_marshalling.c \
@@ -4675,6 +4693,22 @@ p11_child_LDADD += \
     $(P11_KIT_LIBS) \
     $(CRYPTO_LIBS) \
     $(SSL_LIBS) \
+    $(NULL)
+
+fido2_child_SOURCES = \
+    src/fido2_child/fido2_child_fake.c \
+    src/fido2_child/fido2_child_common.c \
+    $(NULL)
+
+fido2_child_CFLAGS = \
+    $(AM_CFLAGS) \
+    $(POPT_CFLAGS)
+
+fido2_child_LDADD = \
+    libsss_debug.la \
+    $(TALLOC_LIBS) \
+    $(DHASH_LIBS) \
+    $(POPT_LIBS) \
     $(NULL)
 
 if BUILD_OIDC_CHILD
