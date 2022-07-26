@@ -78,6 +78,11 @@ fido2_parse_args(int argc, const char *argv[], struct options *options)
     struct poptOption long_options[] = {
         POPT_AUTOHELP
         SSSD_DEBUG_OPTS
+        {"dumpable", 0, POPT_ARG_INT, &dumpable, 0,
+         _("Allow core dumps"), NULL },
+        {"debug-fd", 0, POPT_ARG_INT, &debug_fd, 0,
+         _("An open file descriptor for the debug logs"), NULL},
+        SSSD_LOGGER_OPTS
         {"register", 0, POPT_ARG_NONE, NULL, 'r',
          _("Register a FIDO2 key for a user"), NULL },
          {"authenticate", 0, POPT_ARG_NONE, NULL, 'a',
