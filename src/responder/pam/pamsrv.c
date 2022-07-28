@@ -49,6 +49,7 @@
 #define NO_DOMAINS_ARE_PUBLIC "none"
 #define DEFAULT_ALLOWED_UIDS ALL_UIDS_ALLOWED
 #define DEFAULT_PAM_CERT_AUTH false
+#define DEFAULT_PAM_FIDO2_AUTH false
 #define DEFAULT_PAM_CERT_DB_PATH SYSCONFDIR"/sssd/pki/sssd_auth_ca_db.pem"
 #define DEFAULT_PAM_INITGROUPS_SCHEME "no_session"
 
@@ -305,6 +306,18 @@ static int pam_process_init(TALLOC_CTX *mem_ctx,
             goto done;
         }
 
+    }
+
+    /* Check if fido2 authentication is enabled */
+    ret = confdb_get_bool(pctx->rctx->cdb,
+                          CONFDB_PAM_CONF_ENTRY,
+                          CONFDB_PAM_FIDO2_AUTH,
+                          DEFAULT_PAM_FIDO2_AUTH,
+                          &pctx->fido2_auth);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_FATAL_FAILURE, "Failed to check if fido2 authentication is " \
+                                    "enabled.\n");
+        goto done;
     }
 
     if (pctx->cert_auth || pctx->num_prompting_config_sections != 0) {

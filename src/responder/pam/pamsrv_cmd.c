@@ -100,6 +100,12 @@ static errno_t check_cert(TALLOC_CTX *mctx,
 
 static int pam_check_user_done(struct pam_auth_req *preq, int ret);
 
+static errno_t check_fido2(TALLOC_CTX *mctx,
+                           struct tevent_context *ev,
+                           struct pam_ctx *pctx,
+                           struct pam_auth_req *preq,
+                           struct pam_data *pd);
+
 static errno_t pack_user_info_msg(TALLOC_CTX *mem_ctx,
                                   const char *user_error_message,
                                   size_t *resp_len,
@@ -1477,6 +1483,64 @@ static errno_t check_cert(TALLOC_CTX *mctx,
     return EAGAIN;
 }
 
+static void pam_forwarder_fido2_cb(struct tevent_req *req);
+
+static errno_t check_fido2(TALLOC_CTX *mctx,
+                          struct tevent_context *ev,
+                          struct pam_ctx *pctx,
+                          struct pam_auth_req *preq,
+                          struct pam_data *pd)
+{
+    char *fido2_verification_opts;
+    bool debug_libfido2;
+    int timeout;
+    errno_t ret;
+    struct tevent_req *req;
+
+    /* fido2_verification */
+    ret = confdb_get_string(pctx->rctx->cdb, mctx, CONFDB_MONITOR_CONF_ENTRY,
+                            CONFDB_MONITOR_FIDO2_VERIFICATION, NULL,
+                            &fido2_verification_opts);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+            "Failed to read '"CONFDB_MONITOR_FIDO2_VERIFICATION"' from confdb: [%d]: %s\n",
+            ret, sss_strerror(ret));
+        return ret;
+    }
+
+    /* timeout */
+    ret = confdb_get_int(pctx->rctx->cdb, CONFDB_PAM_CONF_ENTRY,
+                         CONFDB_PAM_FIDO2_CHILD_TIMEOUT, FIDO2_CHILD_TIMEOUT_DEFAULT,
+                         &timeout);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+              "Failed to read fido2_child_timeout from confdb: [%d]: %s\n",
+              ret, sss_strerror(ret));
+        return ret;
+    }
+
+    /* debug_libfido2 */
+    ret = confdb_get_bool(pctx->rctx->cdb, CONFDB_PAM_CONF_ENTRY,
+                         CONFDB_PAM_DEBUG_LIBFIDO2, false,
+                         &debug_libfido2);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+              "Failed to read fido2_child_timeout from confdb: [%d]: %s\n",
+              ret, sss_strerror(ret));
+        return ret;
+    }
+    req = pam_fido2_auth_send(mctx, ev, timeout, debug_libfido2,
+                              fido2_verification_opts, pd);
+    if (req == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "pam_fido2_auth_send failed.\n");
+        return ENOMEM;
+    }
+
+    tevent_req_set_callback(req, pam_forwarder_fido2_cb, preq);
+    return EAGAIN;
+}
+
+
 static int pam_forwarder(struct cli_ctx *cctx, int pam_cmd)
 {
     struct pam_auth_req *preq;
@@ -1541,6 +1605,11 @@ static int pam_forwarder(struct cli_ctx *cctx, int pam_cmd)
               sss_authtok_get_type(pd->authtok),
               sss_authtok_type_to_str(sss_authtok_get_type(pd->authtok)));
         ret = ERR_NO_CREDS;
+        goto done;
+    }
+
+    if (may_do_fido2_auth(pctx)) {
+        ret = check_fido2(cctx, cctx->ev, pctx, preq, pd);
         goto done;
     }
 
@@ -1903,6 +1972,32 @@ static void pam_forwarder_lookup_by_cert_done(struct tevent_req *req)
 done:
     pam_check_user_done(preq, ret);
 }
+
+static void pam_forwarder_fido2_cb(struct tevent_req *req)
+{
+    struct pam_auth_req *preq = tevent_req_callback_data(req,
+                                                         struct pam_auth_req);
+    struct pam_data *pd;
+    errno_t ret = EOK;
+
+    ret = pam_fido2_auth_recv(req, preq, preq->fido2_data);
+    talloc_free(req);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "PAM Fido2 auth failed.\n");
+        goto done;
+    }
+
+    pd = preq->pd;
+
+    preq->pd->pam_status = PAM_SUCCESS;
+    pam_reply(preq);
+
+    return;
+
+done:
+    pam_check_user_done(preq, ret);
+}
+
 
 static void pam_forwarder_cb(struct tevent_req *req)
 {

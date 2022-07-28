@@ -71,6 +71,8 @@ struct pam_ctx {
     /* List of authentication indicators associated with a PAM service */
     char **gssapi_indicators_map;
     bool gssapi_check_upn;
+
+    bool fido2_auth;
 };
 
 struct pam_auth_req {
@@ -92,6 +94,8 @@ struct pam_auth_req {
     struct cert_auth_info *cert_list;
     struct cert_auth_info *current_cert;
     bool cert_auth_local;
+
+    struct fido2_auth_data *fido2_data;
 
     uint32_t client_id_num;
 };
@@ -153,5 +157,16 @@ const char *pam_initgroup_enum_to_string(enum pam_initgroups_scheme scheme);
 
 int pam_cmd_gssapi_init(struct cli_ctx *cli_ctx);
 int pam_cmd_gssapi_sec_ctx(struct cli_ctx *cctx);
+
+struct fido2_auth_data;
+struct tevent_req *pam_fido2_auth_send(TALLOC_CTX *mem_ctx,
+                                       struct tevent_context *ev,
+                                       int timeout,
+                                       bool debug_libfido2,
+                                       const char *verify_opts,
+                                       struct pam_data *pd);
+errno_t pam_fido2_auth_recv(struct tevent_req *req, TALLOC_CTX *mem_ctx,
+                            struct fido2_auth_data *fido2_data);
+bool may_do_fido2_auth(struct pam_ctx *pctx);
 
 #endif /* __PAMSRV_H__ */
