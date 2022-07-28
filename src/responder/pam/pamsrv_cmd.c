@@ -100,6 +100,12 @@ static errno_t check_cert(TALLOC_CTX *mctx,
 
 static int pam_check_user_done(struct pam_auth_req *preq, int ret);
 
+static errno_t check_passkey(TALLOC_CTX *mctx,
+                           struct tevent_context *ev,
+                           struct pam_ctx *pctx,
+                           struct pam_auth_req *preq,
+                           struct pam_data *pd);
+
 static errno_t pack_user_info_msg(TALLOC_CTX *mem_ctx,
                                   const char *user_error_message,
                                   size_t *resp_len,
@@ -1478,6 +1484,64 @@ static errno_t check_cert(TALLOC_CTX *mctx,
     return EAGAIN;
 }
 
+static void pam_forwarder_passkey_cb(struct tevent_req *req);
+
+static errno_t check_passkey(TALLOC_CTX *mctx,
+                             struct tevent_context *ev,
+                             struct pam_ctx *pctx,
+                             struct pam_auth_req *preq,
+                             struct pam_data *pd)
+{
+    char *passkey_verification_opts;
+    bool debug_libfido2;
+    int timeout;
+    errno_t ret;
+    struct tevent_req *req;
+
+    /* passkey_verification */
+    ret = confdb_get_string(pctx->rctx->cdb, mctx, CONFDB_MONITOR_CONF_ENTRY,
+                            CONFDB_MONITOR_PASSKEY_VERIFICATION, NULL,
+                            &passkey_verification_opts);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+            "Failed to read '"CONFDB_MONITOR_PASSKEY_VERIFICATION"' from confdb: [%d]: %s\n",
+            ret, sss_strerror(ret));
+        return ret;
+    }
+
+    /* timeout */
+    ret = confdb_get_int(pctx->rctx->cdb, CONFDB_PAM_CONF_ENTRY,
+                         CONFDB_PAM_PASSKEY_CHILD_TIMEOUT, PASSKEY_CHILD_TIMEOUT_DEFAULT,
+                         &timeout);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+              "Failed to read passkey_child_timeout from confdb: [%d]: %s\n",
+              ret, sss_strerror(ret));
+        return ret;
+    }
+
+    /* debug_libfido2 */
+    ret = confdb_get_bool(pctx->rctx->cdb, CONFDB_PAM_CONF_ENTRY,
+                         CONFDB_PAM_DEBUG_LIBFIDO2, false,
+                         &debug_libfido2);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+              "Failed to read debug libfido2 from confdb: [%d]: %s\n",
+              ret, sss_strerror(ret));
+        return ret;
+    }
+    req = pam_passkey_auth_send(mctx, ev, timeout, debug_libfido2,
+                              passkey_verification_opts, pd);
+    if (req == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "pam_passkey_auth_send failed.\n");
+        return ENOMEM;
+    }
+
+    tevent_req_set_callback(req, pam_forwarder_passkey_cb, preq);
+    return EAGAIN;
+}
+
+
 static int pam_forwarder(struct cli_ctx *cctx, int pam_cmd)
 {
     struct pam_auth_req *preq;
@@ -1543,6 +1607,24 @@ static int pam_forwarder(struct cli_ctx *cctx, int pam_cmd)
               sss_authtok_type_to_str(sss_authtok_get_type(pd->authtok)));
         ret = ERR_NO_CREDS;
         goto done;
+    }
+
+    if (may_do_passkey_auth(pctx)) {
+	if (pd->cmd == SSS_PAM_PREAUTH) {
+	    ret = pam_add_response(preq->pd, SSS_PASSKEY_PROMPTING, 0, NULL);
+	    if (ret != EOK) {
+		DEBUG(SSSDBG_OP_FAILURE, "pam_add_response failed.\n");
+		preq->pd->pam_status = PAM_AUTHINFO_UNAVAIL;
+		pam_reply(preq);
+		goto done;
+	    }
+	    preq->pd->pam_status = PAM_SUCCESS;
+	    pam_reply(preq);
+	    goto done;
+	} else if (pd->cmd == SSS_PAM_AUTHENTICATE) {
+            ret = check_passkey(cctx, cctx->ev, pctx, preq, pd);
+            goto done;
+	}
     }
 
     /* Try backend first for authentication before doing local Smartcard
@@ -1904,6 +1986,32 @@ static void pam_forwarder_lookup_by_cert_done(struct tevent_req *req)
 done:
     pam_check_user_done(preq, ret);
 }
+
+static void pam_forwarder_passkey_cb(struct tevent_req *req)
+{
+    struct pam_auth_req *preq = tevent_req_callback_data(req,
+                                                         struct pam_auth_req);
+    struct pam_data *pd;
+    errno_t ret = EOK;
+
+    ret = pam_passkey_auth_recv(req, preq, preq->passkey_data);
+    talloc_free(req);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "PAM passkey auth failed.\n");
+        goto done;
+    }
+
+    pd = preq->pd;
+
+    preq->pd->pam_status = PAM_SUCCESS;
+    pam_reply(preq);
+
+    return;
+
+done:
+    pam_check_user_done(preq, ret);
+}
+
 
 static void pam_forwarder_cb(struct tevent_req *req)
 {
