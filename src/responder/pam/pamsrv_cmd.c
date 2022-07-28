@@ -42,9 +42,15 @@ enum pam_verbosity {
 };
 
 #define DEFAULT_PAM_VERBOSITY PAM_VERBOSITY_IMPORTANT
+#define PASSKEY_PREFIX "passkey:"
 
 struct pam_initgroup_enum_str {
     enum pam_initgroups_scheme scheme;
+    const char *option;
+};
+
+struct pam_passkey_verification_enum_str {
+    enum passkey_user_verification verification;
     const char *option;
 };
 
@@ -54,6 +60,17 @@ struct pam_initgroup_enum_str pam_initgroup_enum_str[] = {
     { PAM_INITGR_ALWAYS, "always" },
     { PAM_INITGR_INVALID, NULL }
 };
+
+struct pam_passkey_verification_enum_str pam_passkey_verification_enum_str[] = {
+    { PAM_PASSKEY_VERIFICATION_ON, "on" },
+    { PAM_PASSKEY_VERIFICATION_OFF, "off" },
+    { PAM_PASSKEY_VERIFICATION_UNSET, "unset" },
+    { PAM_PASSKEY_VERIFICATION_INVALID, NULL }
+};
+
+#define USER_VERIFICATION "user_verification="
+#define USER_VERIFICATION_LEN (sizeof(USER_VERIFICATION) -1)
+
 
 enum pam_initgroups_scheme pam_initgroups_string_to_enum(const char *str)
 {
@@ -81,6 +98,19 @@ const char *pam_initgroup_enum_to_string(enum pam_initgroups_scheme scheme)
     return "(NULL)";
 }
 
+const char *pam_passkey_verification_enum_to_string(enum passkey_user_verification verification)
+{
+    size_t c;
+
+    for (c = 0 ; pam_passkey_verification_enum_str[c].option != NULL; c++) {
+        if (pam_passkey_verification_enum_str[c].verification == verification) {
+            return pam_passkey_verification_enum_str[c].option;
+        }
+    }
+
+    return "(NULL)";
+}
+
 
 static errno_t
 pam_null_last_online_auth_with_curr_token(struct sss_domain_info *domain,
@@ -99,6 +129,12 @@ static errno_t check_cert(TALLOC_CTX *mctx,
                           struct pam_data *pd);
 
 static int pam_check_user_done(struct pam_auth_req *preq, int ret);
+
+static errno_t check_passkey(TALLOC_CTX *mctx,
+                           struct tevent_context *ev,
+                           struct pam_ctx *pctx,
+                           struct pam_auth_req *preq,
+                           struct pam_data *pd);
 
 static errno_t pack_user_info_msg(TALLOC_CTX *mem_ctx,
                                   const char *user_error_message,
@@ -1478,6 +1514,436 @@ static errno_t check_cert(TALLOC_CTX *mctx,
     return EAGAIN;
 }
 
+struct passkey_ctx {
+    struct pam_ctx *pam_ctx;
+    struct tevent_context *ev;
+    struct pam_data *pd;
+    struct pam_auth_req *preq;
+};
+
+static void pam_forwarder_passkey_cb(struct tevent_req *req);
+
+struct tevent_req *pam_passkey_get_mapping_send(TALLOC_CTX *mem_ctx,
+                                                struct tevent_context *ev,
+                                                struct passkey_ctx *pctx);
+void pam_passkey_get_user_done(struct tevent_req *req);
+void pam_passkey_get_mapping_done(struct tevent_req *req);
+errno_t pam_passkey_get_mapping_recv(TALLOC_CTX *mem_ctx,
+                                     struct tevent_req *req,
+                                     struct cache_req_result **_result);
+
+struct passkey_get_mapping_state {
+    struct pam_data *pd;
+    struct cache_req_result *result;
+};
+
+static errno_t check_passkey(TALLOC_CTX *mem_ctx,
+                             struct tevent_context *ev,
+                             struct pam_ctx *pam_ctx,
+                             struct pam_auth_req *preq,
+                             struct pam_data *pd)
+{
+    struct tevent_req *req;
+    struct passkey_ctx *pctx;
+    errno_t ret;
+
+    pctx = talloc_zero(mem_ctx, struct passkey_ctx);
+    if (pctx == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "pctx == NULL\n");
+        return ENOMEM;
+    }
+
+    pctx->pd = pd;
+    pctx->pam_ctx = pam_ctx;
+    pctx->ev = ev;
+    pctx->preq = preq;
+
+    DEBUG(SSSDBG_TRACE_FUNC, "Checking for passkey authentication data\n");
+
+    req = pam_passkey_get_mapping_send(mem_ctx, pctx->ev, pctx);
+    if (req == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "pam_passkey_get_mapping_send failed.\n");
+        ret = ENOMEM;
+        goto done;
+    }
+
+    tevent_req_set_callback(req, pam_passkey_get_user_done, pctx);
+
+    ret = EAGAIN;
+
+done:
+    if (ret != EAGAIN) {
+        talloc_free(pctx);
+    }
+
+    return ret;
+}
+
+struct tevent_req *pam_passkey_get_mapping_send(TALLOC_CTX *mem_ctx,
+                                                struct tevent_context *ev,
+                                                struct passkey_ctx *pk_ctx)
+{
+
+    struct passkey_get_mapping_state *state;
+    struct tevent_req *req;
+    struct tevent_req *subreq;
+    int ret;
+    static const char *attrs[] = { SYSDB_NAME, SYSDB_USER_PASSKEY, NULL };
+
+    req = tevent_req_create(mem_ctx, &state, struct passkey_get_mapping_state);
+    if (req == NULL) {
+        ret = ENOMEM;
+        goto done;
+    }
+
+    subreq = cache_req_user_by_name_attrs_send(state, pk_ctx->ev,
+                                               pk_ctx->pam_ctx->rctx,
+                                               pk_ctx->pam_ctx->rctx->ncache, 0,
+                                               pk_ctx->pd->domain,
+                                               pk_ctx->pd->user, attrs);
+    if (subreq == NULL) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "Unable to create tevent request!\n");
+        ret = ENOMEM;
+    }
+
+    tevent_req_set_callback(subreq, pam_passkey_get_mapping_done, req);
+
+    return req;
+
+done:
+    tevent_req_error(req, ret);
+    tevent_req_post(req, ev);
+
+    return req;
+}
+
+void pam_passkey_get_mapping_done(struct tevent_req *subreq)
+{
+    struct cache_req_result *result;
+    struct tevent_req *req;
+    struct passkey_get_mapping_state *state;
+
+    errno_t ret;
+
+    req = tevent_req_callback_data(subreq, struct tevent_req);
+    state = tevent_req_data(req, struct passkey_get_mapping_state);
+
+    ret = cache_req_user_by_name_attrs_recv(state, subreq, &result);
+    state->result = result;
+
+    talloc_zfree(subreq);
+    if (ret != EOK) {
+        tevent_req_error(req, ret);
+        return;
+    }
+
+    tevent_req_done(req);
+    return;
+}
+
+errno_t pam_passkey_get_mapping_recv(TALLOC_CTX *mem_ctx,
+                                     struct tevent_req *req,
+                                     struct cache_req_result **_result)
+{
+    struct passkey_get_mapping_state *state = NULL;
+
+    state = tevent_req_data(req, struct passkey_get_mapping_state);
+
+    TEVENT_REQ_RETURN_ON_ERROR(req);
+
+    *_result = talloc_steal(mem_ctx, state->result);
+    return EOK;
+}
+
+static errno_t read_passkey_conf_verification(TALLOC_CTX *mem_ctx,
+                                              const char *verify_opts,
+                                              enum passkey_user_verification *_user_verification,
+                                              bool *_debug_libfido2)
+{
+    int ret;
+    TALLOC_CTX *tmp_ctx;
+    char **opts;
+    size_t c;
+
+    tmp_ctx = talloc_new(NULL);
+    if (tmp_ctx == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_new failed.\n");
+        return ENOMEM;
+    }
+
+    if (verify_opts == NULL) {
+        ret = EOK;
+        goto done;
+    }
+
+    ret = split_on_separator(tmp_ctx, verify_opts, ',', true, true, &opts,
+                             NULL);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "split_on_separator failed [%d], %s.\n",
+                                 ret, sss_strerror(ret));
+        goto done;
+    }
+
+    for (c = 0; opts[c] != NULL; c++) {
+        if (strncasecmp(opts[c], USER_VERIFICATION, USER_VERIFICATION_LEN) == 0) {
+            if (strcasecmp("true", &opts[c][USER_VERIFICATION_LEN]) == 0) {
+                DEBUG(SSSDBG_TRACE_FUNC, "user_verification set to true.\n");
+                *_user_verification = PAM_PASSKEY_VERIFICATION_ON;
+            } else if (strcasecmp("false", &opts[c][USER_VERIFICATION_LEN]) == 0) {
+                DEBUG(SSSDBG_TRACE_FUNC, "user_verification set to false.\n");
+                *_user_verification = PAM_PASSKEY_VERIFICATION_OFF;
+            }
+        } else if (strcasecmp(opts[c], "debug_libfido2") == 0) {
+           DEBUG(SSSDBG_TRACE_FUNC, "Enabling debug_libfido2.\n");
+           *_debug_libfido2 = true;
+        } else {
+           DEBUG(SSSDBG_MINOR_FAILURE,
+                 "Unsupported passkey verification option [%s], " \
+                 "skipping.\n", opts[c]);
+        }
+    }
+
+    ret = EOK;
+
+done:
+    talloc_free(tmp_ctx);
+
+    return ret;
+}
+
+static errno_t check_passkey_verification(TALLOC_CTX *mem_ctx,
+                                          struct passkey_ctx *pctx,
+                                          struct confdb_ctx *cdb,
+                                          struct sysdb_ctx *sysdb,
+                                          const char *domain_name,
+                                          struct pk_child_user_data *pk_data,
+                                          enum passkey_user_verification *_user_verification,
+                                          bool *_debug_libfido2)
+{
+    TALLOC_CTX *tmp_ctx;
+    errno_t ret;
+    tmp_ctx = talloc_new(NULL);
+    const char *verification_from_ldap;
+    char *verify_opts = NULL;
+    bool debug_libfido2 = false;
+    enum passkey_user_verification verification = PAM_PASSKEY_VERIFICATION_UNSET;
+
+    tmp_ctx = talloc_new(NULL);
+    if (tmp_ctx == NULL) {
+        return ENOMEM;
+    }
+
+    ret = sysdb_domain_get_passkey_user_verification(tmp_ctx, sysdb, domain_name,
+                                                     &verification_from_ldap);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "Failed to read passkeyUserVerification from sysdb: [%d]: %s\n",
+              ret, sss_strerror(ret));
+        goto done;
+    }
+
+    /* If require user verification setting is set in LDAP, use it */
+    if (verification_from_ldap != NULL) {
+        if (strcmp(verification_from_ldap, "on") == 0) {
+            verification = PAM_PASSKEY_VERIFICATION_ON;
+        } else if (strcmp(verification_from_ldap, "off") == 0) {
+            verification = PAM_PASSKEY_VERIFICATION_OFF;
+        /* Else, default, don't specify user-verification arg */
+        } else {
+            verification = PAM_PASSKEY_VERIFICATION_UNSET;
+        }
+        DEBUG(SSSDBG_TRACE_FUNC, "Passkey verification is being enforced from LDAP\n");
+    } else {
+        /* No verification set in LDAP, fallback to local sssd.conf setting */
+        ret = confdb_get_string(pctx->pam_ctx->rctx->cdb, tmp_ctx, CONFDB_MONITOR_CONF_ENTRY,
+                                CONFDB_MONITOR_PASSKEY_VERIFICATION, NULL,
+                                &verify_opts);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE,
+                "Failed to read '"CONFDB_MONITOR_PASSKEY_VERIFICATION"' from confdb: [%d]: %s\n",
+                ret, sss_strerror(ret));
+            goto done;
+        }
+
+        ret = read_passkey_conf_verification(tmp_ctx, verify_opts, &verification, &debug_libfido2);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_MINOR_FAILURE, "Unable to parse passkey verificaton options.\n");
+            /* Continue anyway */
+        }
+        DEBUG(SSSDBG_TRACE_FUNC, "Passkey verification is being enforced from local configuration\n");
+    }
+    DEBUG(SSSDBG_TRACE_FUNC, "Passkey verification setting [%s]\n",
+                             pam_passkey_verification_enum_to_string(verification));
+
+    *_user_verification = verification;
+    *_debug_libfido2 = debug_libfido2;
+
+    ret = EOK;
+
+done:
+    talloc_free(tmp_ctx);
+
+    return EOK;
+}
+
+errno_t process_passkey_data(TALLOC_CTX *mem_ctx,
+                             struct ldb_message *user_mesg,
+                             const char *domain,
+                             struct pk_child_user_data *_data)
+{
+    struct ldb_message_element *el;
+    TALLOC_CTX *tmp_ctx;
+    int ret;
+    char **mappings;
+    const char *kh_mapping;
+    const char *domain_name;
+
+    tmp_ctx = talloc_new(NULL);
+    if (tmp_ctx == NULL) {
+        ERROR("talloc_new() failed\n");
+        return ENOMEM;
+    }
+
+    el = ldb_msg_find_element(user_mesg, SYSDB_USER_PASSKEY);
+    if (el == NULL) {
+        DEBUG(SSSDBG_TRACE_FUNC, "No passkey data found\n");
+        ret = ENOENT;
+        goto done;
+    }
+
+    ret = split_on_separator(tmp_ctx, (const char *) el->values[0].data, ',', true, true,
+                             &mappings, NULL);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "Incorrectly formatted passkey data [%d]: %s\n",
+                                 ret, sss_strerror(ret));
+        goto done;
+    }
+
+    kh_mapping = talloc_strdup(tmp_ctx, mappings[0] + strlen(PASSKEY_PREFIX));
+    if (kh_mapping == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_strdup key handle failed.\n");
+        ret = ENOMEM;
+        goto done;
+    }
+
+    domain_name = talloc_strdup(tmp_ctx, domain);
+    if (domain_name == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_strdup domain failed.\n");
+        ret = ENOMEM;
+        goto done;
+    }
+
+    _data->domain = talloc_steal(mem_ctx, domain_name);
+    _data->key_handle = talloc_steal(mem_ctx, kh_mapping);
+    _data->public_key = talloc_steal(mem_ctx, mappings[1]);
+
+    ret = EOK;
+done:
+    talloc_free(tmp_ctx);
+
+    return ret;
+}
+
+void pam_passkey_get_user_done(struct tevent_req *req)
+{
+    int ret;
+    struct passkey_ctx *pctx;
+    bool debug_libfido2 = false;
+    int timeout;
+    struct cache_req_result *result;
+    struct pk_child_user_data *pk_data;
+    enum passkey_user_verification verification = PAM_PASSKEY_VERIFICATION_UNSET;
+
+    pctx = tevent_req_callback_data(req, struct passkey_ctx);
+
+    ret = pam_passkey_get_mapping_recv(pctx, req, &result);
+    talloc_zfree(req);
+    if (ret != EOK && ret != ENOENT) {
+        DEBUG(SSSDBG_OP_FAILURE, "cache_req_user_by_name_attrs_recv failed [%d]: %s.\n",
+                                 ret, sss_strerror(ret));
+        goto done;
+    }
+
+    pk_data = talloc_zero(pctx, struct pk_child_user_data);
+    if (!pk_data) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "pk_data == NULL\n");
+        ret = ENOMEM;
+        goto done;
+    }
+
+    /* Get passkey data */
+    DEBUG(SSSDBG_TRACE_ALL, "Processing passkey data\n");
+    ret = process_passkey_data(pk_data, result->msgs[0], result->domain->name, pk_data);
+    if (ret == ENOENT) {
+        DEBUG(SSSDBG_TRACE_FUNC, "No passkey data found, skipping passkey auth\n");
+		pctx->preq->pd->pam_status = PAM_USER_UNKNOWN;
+        goto done;
+    }
+
+    /* timeout */
+    ret = confdb_get_int(pctx->pam_ctx->rctx->cdb, CONFDB_PAM_CONF_ENTRY,
+                         CONFDB_PAM_PASSKEY_CHILD_TIMEOUT, PASSKEY_CHILD_TIMEOUT_DEFAULT,
+                         &timeout);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "Failed to read passkey_child_timeout from confdb: [%d]: %s\n",
+              ret, sss_strerror(ret));
+        goto done;
+    }
+
+    ret = check_passkey_verification(pctx, pctx, pctx->pam_ctx->rctx->cdb,
+                                     result->domain->sysdb, result->domain->name,
+                                     pk_data, &verification, &debug_libfido2);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "Failed to check passkey verification [%d]: %s\n",
+              ret, sss_strerror(ret));
+        goto done;
+    }
+
+    /* Preauth respond with prompt_pin true or false based on user verification */
+    if (pctx->pd->cmd == SSS_PAM_PREAUTH) {
+        const char *prompt_pin = verification == PAM_PASSKEY_VERIFICATION_OFF ? "false" : "true";
+
+        ret = pam_add_response(pctx->pd, SSS_PAM_PASSKEY_INFO, strlen(prompt_pin) + 1,
+                               (const uint8_t *) prompt_pin);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_CRIT_FAILURE, "pam_add_response failed. [%d]: %s\n",
+                  ret, sss_strerror(ret));
+            goto done;
+        }
+
+        pctx->pd->pam_status = PAM_SUCCESS;
+        pam_reply(pctx->preq);
+        talloc_free(pk_data);
+        return;
+    }
+
+    req = pam_passkey_auth_send(pctx, pctx->ev, timeout, debug_libfido2,
+                                verification, pctx->pd, pk_data);
+    if (req == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "pam_passkey_auth_send failed [%d]: %s\n",
+                                 ret, sss_strerror(ret));
+        goto done;
+    }
+
+    tevent_req_set_callback(req, pam_forwarder_passkey_cb, pctx->preq);
+
+done:
+    talloc_free(pk_data);
+
+    if (ret == ENOENT) {
+        pctx->pd->pam_status = PAM_USER_UNKNOWN;
+        pam_reply(pctx->preq);
+    } else if (ret != EOK) {
+        pctx->pd->pam_status = PAM_SYSTEM_ERR;
+        pam_reply(pctx->preq);
+    }
+
+    return;
+}
+
+
 static int pam_forwarder(struct cli_ctx *cctx, int pam_cmd)
 {
     struct pam_auth_req *preq;
@@ -1542,6 +2008,12 @@ static int pam_forwarder(struct cli_ctx *cctx, int pam_cmd)
               sss_authtok_get_type(pd->authtok),
               sss_authtok_type_to_str(sss_authtok_get_type(pd->authtok)));
         ret = ERR_NO_CREDS;
+        goto done;
+    }
+
+    if (may_do_passkey_auth(pctx, pd)) {
+        /* Preauth and Auth */
+        ret = check_passkey(cctx, cctx->ev, pctx, preq, pd);
         goto done;
     }
 
@@ -1904,6 +2376,31 @@ static void pam_forwarder_lookup_by_cert_done(struct tevent_req *req)
 done:
     pam_check_user_done(preq, ret);
 }
+
+static void pam_forwarder_passkey_cb(struct tevent_req *req)
+{
+    struct pam_auth_req *preq = tevent_req_callback_data(req,
+                                                         struct pam_auth_req);
+    errno_t ret = EOK;
+    int child_status;
+
+    ret = pam_passkey_auth_recv(req, &child_status);
+    talloc_free(req);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "PAM passkey auth failed [%d]: %s\n",
+                                 ret, sss_strerror(ret));
+        goto done;
+    }
+
+    preq->pd->pam_status = PAM_SUCCESS;
+    pam_reply(preq);
+
+    return;
+
+done:
+    pam_check_user_done(preq, ret);
+}
+
 
 static void pam_forwarder_cb(struct tevent_req *req)
 {
