@@ -39,6 +39,13 @@ enum pam_initgroups_scheme {
     PAM_INITGR_INVALID
 };
 
+enum passkey_user_verification {
+    PAM_PASSKEY_VERIFICATION_ON,
+    PAM_PASSKEY_VERIFICATION_OFF,
+    PAM_PASSKEY_VERIFICATION_UNSET,
+    PAM_PASSKEY_VERIFICATION_INVALID
+};
+
 struct pam_ctx {
     struct resp_ctx *rctx;
     time_t id_timeout;
@@ -71,6 +78,8 @@ struct pam_ctx {
     /* List of authentication indicators associated with a PAM service */
     char **gssapi_indicators_map;
     bool gssapi_check_upn;
+
+    bool passkey_auth;
 };
 
 struct pam_auth_req {
@@ -92,6 +101,8 @@ struct pam_auth_req {
     struct cert_auth_info *cert_list;
     struct cert_auth_info *current_cert;
     bool cert_auth_local;
+
+    struct passkey_auth_data *passkey_data;
 
     uint32_t client_id_num;
 };
@@ -153,5 +164,29 @@ const char *pam_initgroup_enum_to_string(enum pam_initgroups_scheme scheme);
 
 int pam_cmd_gssapi_init(struct cli_ctx *cli_ctx);
 int pam_cmd_gssapi_sec_ctx(struct cli_ctx *cctx);
+
+struct passkey_auth_data {
+    char *key;
+    char *name;
+};
+struct pk_child_user_data {
+    const char *user;
+    const char *domain;
+    const char *public_key;
+    const char *key_handle;
+    const char *user_verification;
+};
+struct tevent_req *pam_passkey_auth_send(TALLOC_CTX *mem_ctx,
+                                       struct tevent_context *ev,
+                                       int timeout,
+                                       bool debug_libfido2,
+                                       enum passkey_user_verification verification,
+                                       struct pam_data *pd,
+                                       struct pk_child_user_data *pk_data,
+                                       const char *domain);
+errno_t pam_passkey_auth_recv(struct tevent_req *req,
+                            int *child_status);
+bool may_do_passkey_auth(struct pam_ctx *pctx,
+                         struct pam_data *pd);
 
 #endif /* __PAMSRV_H__ */

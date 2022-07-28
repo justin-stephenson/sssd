@@ -187,6 +187,9 @@ errno_t pam_eval_prompting_config(struct pam_ctx *pctx, struct pam_data *pd)
         case SSS_PAM_CERT_INFO:
             cert_auth = true;
             break;
+        case SSS_PAM_PASSKEY_INFO:
+            passkey_auth = true;
+            break;
         case SSS_PASSWORD_PROMPTING:
             password_auth = true;
             break;
