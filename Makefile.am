@@ -735,6 +735,7 @@ dist_noinst_HEADERS = \
     src/responder/common/cache_req/cache_req_private.h \
     src/responder/pam/pamsrv.h \
     src/responder/pam/pam_helpers.h \
+    src/responder/pam/pamsrv_passkey.h \
     src/responder/nss/nss_private.h \
     src/responder/nss/nss_protocol.h \
     src/responder/nss/nss_iface.h \
@@ -1551,6 +1552,7 @@ sssd_pam_SOURCES = \
     src/responder/pam/pam_prompting_config.c \
     src/sss_client/pam_sss_prompt_config.c \
     src/responder/pam/pam_helpers.c \
+    src/responder/pam/pamsrv_passkey.c \
     $(SSSD_RESPONDER_OBJ)
 sssd_pam_CFLAGS = \
     $(AM_CFLAGS) \
@@ -2605,6 +2607,7 @@ pam_srv_tests_SOURCES = \
     src/sss_client/pam_message.c \
     src/responder/pam/pamsrv_cmd.c \
     src/responder/pam/pamsrv_p11.c \
+    src/responder/pam/pamsrv_passkey.c \
     src/responder/pam/pamsrv_gssapi.c \
     src/responder/pam/pam_helpers.c \
     src/responder/pam/pamsrv_dp.c \
