@@ -354,6 +354,7 @@ class SSSDConfigTestSSSDService(unittest.TestCase):
             'monitor_resolv_conf',
             'implicit_pac_responder',
             'core_dumpable',
+            'fido2_verification',
         ]
 
         self.assertTrue(type(options) == dict,

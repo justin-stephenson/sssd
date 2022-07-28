@@ -55,6 +55,7 @@ class SSSDOptions(object):
                          'polling resolv.conf every five seconds if inotify cannot be used.'),
         'implicit_pac_responder': _('Run PAC responder automatically for AD and IPA provider'),
         'core_dumpable': _('Enable or disable core dumps for all SSSD processes.'),
+        'fido2_verification': _('Tune fido2 verification behavior'),
 
         # [nss]
         'enum_cache_timeout': _('Enumeration cache timeout length (seconds)'),
@@ -113,6 +114,9 @@ class SSSDOptions(object):
         'pam_gssapi_check_upn': _('Whether to match authenticated UPN with target user'),
         'pam_gssapi_indicators_map': _('List of pairs <PAM service>:<authentication indicator> that '
                                        'must be enforced for PAM access with GSSAPI authentication'),
+        'pam_fido2_auth': _('Allow fido2 device authentication.'),
+        'fido2_child_timeout': _('How many seconds will pam_sss wait for fido2_child to finish'),
+        'debug_libfido2': _('Enable debugging in the libfido2 library'),
 
         # [sudo]
         'sudo_timed': _('Whether to evaluate the time-based attributes in sudo rules'),

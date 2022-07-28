@@ -81,6 +81,7 @@
 #define CONFDB_MONITOR_DOMAIN_RESOLUTION_ORDER "domain_resolution_order"
 #define CONFDB_MONITOR_IMPLICIT_PAC_RESPONDER "implicit_pac_responder"
 #define CONFDB_MONITOR_DUMPABLE "core_dumpable"
+#define CONFDB_MONITOR_FIDO2_VERIFICATION "fido2_verification"
 
 /* Both monitor and domains */
 #define CONFDB_NAME_REGEX   "re_expression"
@@ -149,6 +150,9 @@
 #define CONFDB_PAM_GSSAPI_SERVICES "pam_gssapi_services"
 #define CONFDB_PAM_GSSAPI_CHECK_UPN "pam_gssapi_check_upn"
 #define CONFDB_PAM_GSSAPI_INDICATORS_MAP "pam_gssapi_indicators_map"
+#define CONFDB_PAM_FIDO2_AUTH "pam_fido2_auth"
+#define CONFDB_PAM_FIDO2_CHILD_TIMEOUT "fido2_child_timeout"
+#define CONFDB_PAM_DEBUG_LIBFIDO2 "debug_libfido2"
 
 /* SUDO */
 #define CONFDB_SUDO_CONF_ENTRY "config/sudo"
@@ -307,6 +311,11 @@
 #define CONFDB_PC_2FA_1ST_PROMPT "first_prompt"
 #define CONFDB_PC_2FA_2ND_PROMPT "second_prompt"
 #define CONFDB_PC_TYPE_CERT_AUTH "cert_auth"
+#define CONFDB_PC_TYPE_FIDO2 "fido2"
+#define CONFDB_PC_FIDO2_INTERACTIVE "interactive"
+#define CONFDB_PC_FIDO2_INTERACTIVE_PROMPT "interactive_prompt"
+#define CONFDB_PC_FIDO2_TOUCH "touch"
+#define CONFDB_PC_FIDO2_TOUCH_PROMPT "touch_prompt"
 
 struct confdb_ctx;
 struct config_file_ctx;
