@@ -320,12 +320,12 @@ static int pam_process_init(TALLOC_CTX *mem_ctx,
         goto done;
     }
 
-    if (pctx->cert_auth || pctx->num_prompting_config_sections != 0) {
+    if (pctx->cert_auth || pctx->fido2_auth || pctx->num_prompting_config_sections != 0) {
         ret = create_preauth_indicator();
         if (ret != EOK) {
             DEBUG(SSSDBG_OP_FAILURE,
                   "Failed to create pre-authentication indicator file, "
-                  "Smartcard authentication or configured prompting might "
+                  "Smartcard/FIDO2 authentication or configured prompting might "
                   "not work as expected.\n");
         }
     }

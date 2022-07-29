@@ -1766,6 +1766,46 @@ static int prompt_oauth2(pam_handle_t *pamh, struct pam_items *pi)
     return PAM_SUCCESS;
 }
 
+static int prompt_fido2(pam_handle_t *pamh, struct pam_items *pi,
+                        const char *prompt)
+{
+    char *answer = NULL;
+    char *msg;
+    int ret;
+
+    ret = asprintf(&msg, _("%s"), prompt);
+    if (ret == -1) {
+        return PAM_SYSTEM_ERR;
+    }
+
+    ret = do_pam_conversation(pamh, PAM_PROMPT_ECHO_OFF, msg, NULL, &answer);
+    free(msg);
+    if (ret != PAM_SUCCESS) {
+        D(("do_pam_conversation failed."));
+        return ret;
+    }
+
+    if (answer == NULL) {
+        pi->pam_authtok = NULL;
+        pi->pam_authtok_type = SSS_AUTHTOK_TYPE_EMPTY;
+        pi->pam_authtok_size=0;
+    } else {
+        pi->pam_authtok = strdup(answer);
+        _pam_overwrite((void *)answer);
+        free(answer);
+        answer=NULL;
+        if (pi->pam_authtok == NULL) {
+            return PAM_BUF_ERR;
+        }
+        pi->pam_authtok_type = SSS_AUTHTOK_TYPE_FIDO2;
+        pi->pam_authtok_size=strlen(pi->pam_authtok);
+    }
+
+
+    return PAM_SUCCESS;
+}
+
+
 #define SC_PROMPT_FMT "PIN for %s: "
 
 #ifndef discard_const
@@ -2271,6 +2311,11 @@ static int prompt_by_config(pam_handle_t *pamh, struct pam_items *pi)
         case PC_TYPE_2FA_SINGLE:
             ret = prompt_2fa_single(pamh, pi,
                                     pc_get_2fa_single_prompt(pi->pc[c]));
+            break;
+        case PC_TYPE_FIDO2_INTERACTIVE:
+        case PC_TYPE_FIDO2_TOUCH:
+            ret = prompt_fido2(pamh, pi,
+                               pc_get_fido2_prompt(pi->pc[c]));
             break;
         case PC_TYPE_SC_PIN:
             ret = prompt_sc_pin(pamh, pi);

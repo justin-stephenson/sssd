@@ -97,6 +97,58 @@ static errno_t pam_set_2fa_prompting_options(TALLOC_CTX *tmp_ctx,
     return ENOENT;
 }
 
+static errno_t pam_set_fido2_prompting_options(TALLOC_CTX *tmp_ctx,
+                                             struct confdb_ctx *cdb,
+                                             const char *section,
+                                             struct prompt_config ***pc_list)
+{
+    bool fido2_interactive = false;
+    char *fido2_interactive_prompt = NULL;
+    bool fido2_touch = false;
+    char *fido2_touch_prompt = NULL;
+    int ret;
+
+
+    ret = confdb_get_bool(cdb, section, CONFDB_PC_FIDO2_INTERACTIVE, false,
+                          &fido2_interactive);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "confdb_get_bool failed, using defaults");
+    }
+
+    if (fido2_interactive) {
+        ret = confdb_get_string(cdb, tmp_ctx, section, CONFDB_PC_FIDO2_INTERACTIVE_PROMPT,
+                                NULL, &fido2_interactive_prompt);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE, "confdb_get_string failed, using defaults");
+        }
+
+        ret = pc_list_add_fido2_interactive(pc_list, fido2_interactive_prompt);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE, "pc_list_add_fido2_interactive failed.\n");
+        }
+    }
+
+    ret = confdb_get_bool(cdb, section, CONFDB_PC_FIDO2_TOUCH, false,
+                          &fido2_touch);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "confdb_get_bool failed, using defaults");
+    }
+
+    if (fido2_touch) {
+        ret = confdb_get_string(cdb, tmp_ctx, section, CONFDB_PC_FIDO2_TOUCH_PROMPT,
+                                NULL, &fido2_touch_prompt);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE, "confdb_get_string failed, using defaults");
+        }
+        ret = pc_list_add_fido2_touch(pc_list, fido2_touch_prompt);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE, "pc_list_add_fido2_touch failed.\n");
+        }
+    }
+
+    return ret;
+}
+
 static errno_t pam_set_prompting_options(struct confdb_ctx *cdb,
                                          const char *service_name,
                                          char **sections,
@@ -169,6 +221,7 @@ errno_t pam_eval_prompting_config(struct pam_ctx *pctx, struct pam_data *pd)
     bool password_auth = false;
     bool otp_auth = false;
     bool cert_auth = false;
+    bool fido2_auth = false;
     struct prompt_config **pc_list = NULL;
     int resp_len;
     uint8_t *resp_data = NULL;
@@ -186,6 +239,9 @@ errno_t pam_eval_prompting_config(struct pam_ctx *pctx, struct pam_data *pd)
             break;
         case SSS_PAM_CERT_INFO:
             cert_auth = true;
+            break;
+        case SSS_FIDO2_PROMPTING:
+            fido2_auth = true;
             break;
         case SSS_PASSWORD_PROMPTING:
             password_auth = true;
@@ -206,10 +262,25 @@ errno_t pam_eval_prompting_config(struct pam_ctx *pctx, struct pam_data *pd)
     }
 
     DEBUG(SSSDBG_TRACE_ALL, "Authentication types for user [%s] and service "
-                            "[%s]:%s%s%s\n", pd->user, pd->service,
+                            "[%s]:%s%s%s%s\n", pd->user, pd->service,
                             password_auth ? " password": "",
                             otp_auth ? " two-factor" : "",
-                            cert_auth ? " smartcard" : "");
+                            cert_auth ? " smartcard" : "",
+                            fido2_auth ? " fido2" : "");
+
+    if (fido2_auth) {
+        ret = pam_set_prompting_options(pctx->rctx->cdb, pd->service,
+                                        pctx->prompting_config_sections,
+                                        pctx->num_prompting_config_sections,
+                                        CONFDB_PC_TYPE_FIDO2,
+                                        pam_set_fido2_prompting_options,
+                                        &pc_list);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE,
+                  "pam_set_prompting_options failed.\n");
+            goto done;
+        }
+    }
 
     if (cert_auth) {
         /* If certificate based authentication is possilbe, i.e. a Smartcard
