@@ -345,17 +345,17 @@ enum sss_authtok_type {
     SSS_AUTHTOK_TYPE_EMPTY    =  0x0000, /**< No authentication token
                                           * available */
     SSS_AUTHTOK_TYPE_PASSWORD =  0x0001, /**< Authentication token is a
-                                          * password, it may or may no contain
+                                          * password, it may or may not contain
                                           * a trailing \\0 */
     SSS_AUTHTOK_TYPE_CCFILE =    0x0002, /**< Authentication token is a path to
                                           * a Kerberos credential cache file,
-                                          * it may or may no contain
+                                          * it may or may not contain
                                           * a trailing \\0 */
     SSS_AUTHTOK_TYPE_2FA =       0x0003, /**< Authentication token has two
-                                          * factors, they may or may no contain
+                                          * factors, they may or may not contain
                                           * a trailing \\0 */
     SSS_AUTHTOK_TYPE_SC_PIN =    0x0004, /**< Authentication token is a Smart
-                                          * Card PIN, it may or may no contain
+                                          * Card PIN, it may or may not contain
                                           * a trailing \\0 */
     SSS_AUTHTOK_TYPE_SC_KEYPAD = 0x0005, /**< Authentication token indicates
                                           * Smart Card authentication is used
@@ -363,12 +363,15 @@ enum sss_authtok_type {
                                           * at the card reader. */
     SSS_AUTHTOK_TYPE_2FA_SINGLE = 0x0006, /**< Authentication token has two
                                            * factors in a single string, it may
-                                           * or may no contain a trailing \\0 */
+                                           * or may not contain a trailing \\0 */
     SSS_AUTHTOK_TYPE_OAUTH2 =     0x0007, /**< Authentication token is a
                                            * oauth2 token for presented
                                            * challenge that is acquired from
-                                           * Kerberos. It may or may no
+                                           * Kerberos. It may or may not
                                            * contain a trailing \\0 */
+    SSS_AUTHTOK_TYPE_PASSKEY   =  0x0001, /**< Authentication token is a
+                                          * passkey token, it may or may not
+                                          * contain a trailing \\0 */
 };
 
 /**
@@ -505,6 +508,8 @@ enum response_type {
                               * be used together with other prompting options
                               * to determine the type of prompting.
                               * @param None. */
+    SSS_PASSKEY_PROMPTING,    /**< Indicates that passkey authentication is available
+                             * @param None. */
     SSS_PAM_CERT_INFO_WITH_HINT, /**< Same as SSS_PAM_CERT_INFO but user name
                                   * might be missing and should be prompted
                                   * for. */
@@ -625,6 +630,8 @@ enum prompt_config_type {
     PC_TYPE_PASSWORD,
     PC_TYPE_2FA,
     PC_TYPE_2FA_SINGLE,
+    PC_TYPE_PASSKEY_INTERACTIVE,
+    PC_TYPE_PASSKEY_TOUCH,
     PC_TYPE_SC_PIN,
     PC_TYPE_LAST
 };
@@ -636,6 +643,7 @@ const char *pc_get_password_prompt(struct prompt_config *pc);
 const char *pc_get_2fa_1st_prompt(struct prompt_config *pc);
 const char *pc_get_2fa_2nd_prompt(struct prompt_config *pc);
 const char *pc_get_2fa_single_prompt(struct prompt_config *pc);
+const char *pc_get_passkey_prompt(struct prompt_config *pc);
 void pc_list_free(struct prompt_config **pc_list);
 errno_t pc_list_add_password(struct prompt_config ***pc_list,
                              const char *prompt);
@@ -643,6 +651,10 @@ errno_t pc_list_add_2fa(struct prompt_config ***pc_list,
                         const char *prompt_1st, const char *prompt_2nd);
 errno_t pc_list_add_2fa_single(struct prompt_config ***pc_list,
                                const char *prompt);
+errno_t pc_list_add_passkey_interactive(struct prompt_config ***pc_list,
+                                      const char *prompt);
+errno_t pc_list_add_passkey_touch(struct prompt_config ***pc_list,
+                              const char *prompt);
 errno_t pam_get_response_prompt_config(struct prompt_config **pc_list, int *len,
                                        uint8_t **data);
 errno_t pc_list_from_response(int size, uint8_t *buf,
