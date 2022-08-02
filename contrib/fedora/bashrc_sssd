@@ -6,6 +6,7 @@
 # Determine the architecture of the platform we're running on
 SSS_ARCH=$(uname -m)
 
+
 # Determine the lib and libdir locations
 SSS_LIB=$(rpm --eval %{_lib})
 SSS_LIBDIR=$(rpm --eval %{_libdir})
