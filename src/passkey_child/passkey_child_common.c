@@ -67,6 +67,8 @@ parse_arguments(int argc, const char *argv[], struct passkey_data *data)
     data->action = ACTION_NONE;
     data->shortname = NULL;
     data->domain = NULL;
+    data->pin = NULL;
+    data->b64_public_key = NULL;
     data->public_key = NULL;
     data->key_handle = NULL;
     data->type = COSE_ES256;
@@ -89,7 +91,9 @@ parse_arguments(int argc, const char *argv[], struct passkey_data *data)
          _("Shortname"), NULL },
         {"domain", 0, POPT_ARG_STRING, &data->domain, 0,
          _("Domain"), NULL},
-        {"public-key", 0, POPT_ARG_STRING, &data->public_key, 0,
+        {"pin", 0, POPT_ARG_STRING, &data->pin, 0,
+         _("Passkey PIN"), NULL},
+        {"public-key", 0, POPT_ARG_STRING, &data->b64_public_key, 0,
          _("Public key"), NULL },
         {"key-handle", 0, POPT_ARG_STRING, &data->key_handle, 0,
          _("Key handle"), NULL},
@@ -204,7 +208,7 @@ check_arguments(const struct passkey_data *data)
     DEBUG(SSSDBG_TRACE_FUNC, "shortname: %s, domain: %s\n",
           data->shortname, data->domain);
     DEBUG(SSSDBG_TRACE_FUNC, "public_key: %s, key_handle: %s\n",
-          data->public_key, data->key_handle);
+          data->b64_public_key, data->key_handle);
     DEBUG(SSSDBG_TRACE_FUNC, "type: %d\n", data->type);
     DEBUG(SSSDBG_TRACE_FUNC, "user_verification: %d\n",
           data->user_verification);
@@ -225,7 +229,7 @@ check_arguments(const struct passkey_data *data)
 
     if (data->action == ACTION_AUTHENTICATE
         && (data->shortname == NULL || data->domain == NULL
-        || data->public_key == NULL || data->key_handle == NULL)) {
+        || data->b64_public_key == NULL || data->key_handle == NULL)) {
         DEBUG(SSSDBG_OP_FAILURE,
               "Too few arguments for authenticate action.\n");
         ret = ERR_INPUT_PARSE;
@@ -264,12 +268,7 @@ register_key(struct passkey_data *data)
         goto done;
     }
 
-    if (dev_number == 0) {
-        DEBUG(SSSDBG_OP_FAILURE, "No device found. Aborting.\n");
-        fprintf(stderr, "No device found. Aborting.\n");
-        ret = ENOENT;
-        goto done;
-    } else if (dev_number > 1) {
+    if (dev_number > 1) {
         DEBUG(SSSDBG_OP_FAILURE,
               "Only one device is supported at a time. Aborting.\n");
         fprintf(stderr, "Only one device is supported at a time. Aborting.\n");
@@ -277,14 +276,7 @@ register_key(struct passkey_data *data)
         goto done;
     }
 
-    dev = fido_dev_new();
-    if (dev == NULL) {
-        DEBUG(SSSDBG_OP_FAILURE, "fido_dev_new failed.\n");
-        ret = ENOMEM;
-        goto done;
-    }
-
-    ret = select_device(dev_list, 0, dev);
+    ret = select_device(dev_list, 1, NULL, &dev);
     if (ret != EOK) {
         goto done;
     }
@@ -384,6 +376,99 @@ done:
     if (evp_pkey != NULL) {
         EVP_PKEY_free(evp_pkey);
     }
+
+    return ret;
+}
+
+errno_t
+authenticate(struct passkey_data *data)
+{
+    fido_assert_t *assert = NULL;
+    fido_dev_info_t *dev_list = NULL;
+    fido_dev_t *dev = NULL;
+    size_t dev_list_len = 0;
+    errno_t ret;
+
+    dev_list = fido_dev_info_new(DEVLIST_SIZE);
+    if (dev_list == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "fido_dev_info_new failed.\n");
+        ret = ENOMEM;
+        goto done;
+    }
+
+    assert = fido_assert_new();
+    if (assert == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "fido_assert_new failed.\n");
+        ret = ENOMEM;
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "Preparing assert request data.\n");
+    ret = prepare_assert(data, assert);
+    if (ret != FIDO_OK) {
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "Checking for devices.\n");
+    ret = list_devices(dev_list, &dev_list_len);
+    if (ret != EOK) {
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "Selecting device.\n");
+    ret = select_device(dev_list, dev_list_len, assert, &dev);
+    if (ret != EOK) {
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "Comparing the device and policy options.\n");
+    ret = get_device_options(dev, data);
+    if (ret != FIDO_OK) {
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "Resetting assert options.\n");
+    ret = set_assert_options(FIDO_OPT_TRUE, data->user_verification, assert);
+    if (ret != FIDO_OK) {
+        DEBUG(SSSDBG_OP_FAILURE, "Failed to reset assert options.\n");
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "Resetting assert client data.\n");
+    ret = set_assert_client_data_hash(assert);
+    if (ret != FIDO_OK) {
+        DEBUG(SSSDBG_OP_FAILURE, "Failed to reset client data hash.\n");
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "Decoding public key.\n");
+    ret = decode_public_key(data);
+    if (ret != FIDO_OK) {
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "Getting assert.\n");
+    ret = request_assert(data, dev, assert);
+    if (ret != FIDO_OK) {
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "Verifying assert.\n");
+    ret = verify_assert(data, assert);
+    if (ret != FIDO_OK) {
+        goto done;
+    }
+
+    ret = FIDO_OK;
+
+done:
+    reset_public_key(data);
+    if (dev != NULL) {
+        fido_dev_close(dev);
+    }
+    fido_dev_free(&dev);
+    fido_assert_free(&assert);
+    fido_dev_info_free(&dev_list, dev_list_len);
 
     return ret;
 }

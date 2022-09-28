@@ -70,7 +70,14 @@ int main(int argc, const char *argv[])
             goto done;
         }
     } else if (data.action == ACTION_AUTHENTICATE) {
-        ERROR("This action isn't implemented yet.\n");
+        ret = authenticate(&data);
+        if (ret == EOK) {
+            printf("Authentication success.\n");
+            goto done;
+        } else {
+            ERROR("Authentication error.\n");
+            goto done;
+        }
     }
 
 done:
