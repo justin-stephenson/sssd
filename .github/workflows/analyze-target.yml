@@ -30,7 +30,7 @@ jobs:
         comment_result: false
 
   covscan:
-    runs-on: covscan
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
@@ -60,9 +60,11 @@ jobs:
         working-directory: pr
         version: pr${{ github.event.pull_request.number }}
 
-    - name: Run covscan
+    - name: JS-Run covscan
       run: |
-        run-covscan --base-srpm "${{ steps.target.outputs.path }}" --srpm "${{ steps.pr.outputs.path }}" --output-dir logs
+        echo "JS-"
+        echo "${{ steps.target.outputs.path }}"
+        echo "${{ steps.pr.outputs.path }}"
 
     - name: Print result
       uses: next-actions/print-logs@master
