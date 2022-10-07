@@ -7,6 +7,7 @@
 # SSSD - System Security Services Daemon
 
 ## Introduction
+
 SSSD provides a set of daemons to manage access to remote directories and
 authentication mechanisms such as LDAP, Kerberos or FreeIPA. It provides
 an NSS and PAM interface toward the system and a pluggable backend system
