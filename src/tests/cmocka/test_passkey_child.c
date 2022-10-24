@@ -169,7 +169,11 @@ static int teardown(void **state)
 unsigned int
 __wrap_sleep(unsigned int seconds)
 {
-    return 0;
+    int ret;
+
+    ret = mock();
+
+    return ret;
 }
 
 int
@@ -416,11 +420,14 @@ __wrap_fido_assert_verify(const fido_assert_t *assert, size_t idx,
  **********************/
 void test_parse_required_args(void **state)
 {
+    TALLOC_CTX *test_ctx;
     struct passkey_data data;
     int argc = 0;
     const char *argv[19] = { NULL };
     errno_t ret;
 
+    test_ctx = talloc_new(NULL);
+    assert_non_null(test_ctx);
     argv[argc++] = "passkey_child";
     argv[argc++] = "--register";
     argv[argc++] = "--username=user";
@@ -428,26 +435,31 @@ void test_parse_required_args(void **state)
     argv[argc++] = "--public-key=publicKey";
     argv[argc++] = "--key-handle=keyHandle";
 
-    ret = parse_arguments(argc, argv, &data);
+    ret = parse_arguments(test_ctx, argc, argv, &data);
 
     assert_int_equal(ret, 0);
     assert_int_equal(data.action, ACTION_REGISTER);
     assert_string_equal(data.shortname, "user");
     assert_string_equal(data.domain, "test.com");
-    assert_string_equal(data.b64_public_key, "publicKey");
-    assert_string_equal(data.key_handle, "keyHandle");
+    assert_string_equal(data.public_key_list[0], "publicKey");
+    assert_string_equal(data.key_handle_list[0], "keyHandle");
     assert_int_equal(data.type, COSE_ES256);
     assert_int_equal(data.user_verification, FIDO_OPT_OMIT);
     assert_int_equal(data.debug_libfido2, false);
+
+    talloc_free(test_ctx);
 }
 
 void test_parse_all_args(void **state)
 {
+    TALLOC_CTX *test_ctx;
     struct passkey_data data;
     int argc = 0;
     const char *argv[19] = { NULL };
     errno_t ret;
 
+    test_ctx = talloc_new(NULL);
+    assert_non_null(test_ctx);
     argv[argc++] = "passkey_child";
     argv[argc++] = "--authenticate";
     argv[argc++] = "--username=user";
@@ -459,18 +471,20 @@ void test_parse_all_args(void **state)
     argv[argc++] = "--user-verification=true";
     argv[argc++] = "--debug-libfido2";
 
-    ret = parse_arguments(argc, argv, &data);
+    ret = parse_arguments(test_ctx, argc, argv, &data);
 
     assert_int_equal(ret, 0);
     assert_int_equal(data.action, ACTION_AUTHENTICATE);
     assert_string_equal(data.shortname, "user");
     assert_string_equal(data.domain, "test.com");
     assert_string_equal(data.pin, "123456");
-    assert_string_equal(data.b64_public_key, "publicKey");
-    assert_string_equal(data.key_handle, "keyHandle");
+    assert_string_equal(data.public_key_list[0], "publicKey");
+    assert_string_equal(data.key_handle_list[0], "keyHandle");
     assert_int_equal(data.type, COSE_RS256);
     assert_int_equal(data.user_verification, FIDO_OPT_TRUE);
     assert_int_equal(data.debug_libfido2, true);
+
+    talloc_free(test_ctx);
 }
 
 void test_prepare_credentials_ok(void **state)
@@ -540,6 +554,9 @@ void test_list_devices_no_device(void **state)
     for (int i = 0; i < TIMEOUT; i += FREQUENCY) {
         will_return(__wrap_fido_dev_info_manifest, FIDO_OK);
         will_return(__wrap_fido_dev_info_manifest, 0);
+        if (i < (TIMEOUT - 1)) {
+            will_return(__wrap_sleep, 0);
+        }
     }
 
     ret = list_devices(ts->dev_list, &ts->dev_number);
@@ -556,6 +573,9 @@ void test_list_devices_error(void **state)
     for (int i = 0; i < TIMEOUT; i += FREQUENCY) {
         will_return(__wrap_fido_dev_info_manifest, FIDO_ERR_INVALID_ARGUMENT);
         will_return(__wrap_fido_dev_info_manifest, 0);
+        if (i < (TIMEOUT - 1)) {
+            will_return(__wrap_sleep, 0);
+        }
     }
 
     ret = list_devices(ts->dev_list, &ts->dev_number);
@@ -572,7 +592,7 @@ void test_select_device_found(void **state)
     will_return(__wrap_fido_dev_info_path, TEST_PATH);
     will_return(__wrap_fido_dev_open, FIDO_OK);
 
-    ret = select_device(ts->dev_list, 1, NULL, &dev);
+    ret = select_device(ACTION_REGISTER, ts->dev_list, 1, NULL, &dev);
 
     assert_int_equal(ret, FIDO_OK);
     fido_dev_close(dev);
@@ -588,7 +608,7 @@ void test_select_device_open_failed(void **state)
     will_return(__wrap_fido_dev_info_path, TEST_PATH);
     will_return(__wrap_fido_dev_open, FIDO_ERR_INVALID_ARGUMENT);
 
-    ret = select_device(ts->dev_list, 1, NULL, &dev);
+    ret = select_device(ACTION_REGISTER, ts->dev_list, 1, NULL, &dev);
 
     assert_int_equal(ret, FIDO_ERR_INVALID_ARGUMENT);
 }
@@ -743,6 +763,7 @@ void test_register_key_integration(void **state)
     const char *credential_id = "credential_id";
     errno_t ret;
 
+    data.action = ACTION_REGISTER;
     data.shortname = "user";
     data.domain = "test.com";
     data.type = COSE_ES256;
@@ -772,16 +793,18 @@ void test_prepare_assert_ok(void **state)
     struct test_state *ts = talloc_get_type_abort(*state, struct test_state);
     errno_t ret;
 
-    ts->data.key_handle = talloc_strdup(ts, "a2V5SGFuZGxl");
+    ts->data.key_handle_list = talloc_array(ts, char*, 1);
+    ts->data.key_handle_list[0] = talloc_strdup(ts, "a2V5SGFuZGxl");
     will_return(__wrap_fido_assert_set_rp, FIDO_OK);
     will_return(__wrap_fido_assert_allow_cred, FIDO_OK);
     will_return(__wrap_fido_assert_set_uv, FIDO_OK);
     will_return(__wrap_fido_assert_set_clientdata_hash, FIDO_OK);
 
-    ret = prepare_assert(&ts->data, ts->assert);
+    ret = prepare_assert(&ts->data, 0, ts->assert);
 
     assert_int_equal(ret, FIDO_OK);
-    talloc_free(ts->data.key_handle);
+    talloc_free(ts->data.key_handle_list[0]);
+    talloc_free(ts->data.key_handle_list);
 }
 
 void test_prepare_assert_error(void **state)
@@ -789,13 +812,15 @@ void test_prepare_assert_error(void **state)
     struct test_state *ts = talloc_get_type_abort(*state, struct test_state);
     errno_t ret;
 
-    ts->data.key_handle = talloc_strdup(ts, "a2V5SGFuZGxl");
+    ts->data.key_handle_list = talloc_array(ts, char*, 1);
+    ts->data.key_handle_list[0] = talloc_strdup(ts, "a2V5SGFuZGxl");
     will_return(__wrap_fido_assert_set_rp, FIDO_ERR_INVALID_ARGUMENT);
 
-    ret = prepare_assert(&ts->data, ts->assert);
+    ret = prepare_assert(&ts->data, 0, ts->assert);
 
     assert_int_equal(ret, FIDO_ERR_INVALID_ARGUMENT);
-    talloc_free(ts->data.key_handle);
+    talloc_free(ts->data.key_handle_list[0]);
+    talloc_free(ts->data.key_handle_list);
 }
 
 void test_reset_public_key(void **state)
@@ -815,14 +840,15 @@ void test_parse_public_key(void **state)
 {
     TALLOC_CTX *tmp_ctx;
     struct passkey_data data;
+    char *public_key;
     errno_t ret;
 
     tmp_ctx = talloc_new(NULL);
     assert_non_null(tmp_ctx);
     data.type = COSE_ES256;
-    data.b64_public_key = talloc_strdup(tmp_ctx, TEST_PUBLIC_KEY);
+    public_key = talloc_strdup(tmp_ctx, TEST_PUBLIC_KEY);
 
-    ret = decode_public_key(&data);
+    ret = decode_public_key(public_key, &data);
 
     assert_int_equal(ret, EOK);
     assert_non_null(data.public_key);
@@ -834,14 +860,15 @@ void test_parse_public_key_erroneous_key(void **state)
 {
     TALLOC_CTX *tmp_ctx;
     struct passkey_data data;
+    char *public_key;
     errno_t ret;
 
     tmp_ctx = talloc_new(NULL);
     assert_non_null(tmp_ctx);
     data.type = COSE_ES256;
-    data.b64_public_key = talloc_strdup(tmp_ctx, "1234==");
+    public_key = talloc_strdup(tmp_ctx, "1234==");
 
-    ret = decode_public_key(&data);
+    ret = decode_public_key(public_key, &data);
 
     assert_int_equal(ret, FIDO_ERR_INVALID_ARGUMENT);
     reset_public_key(&data);
@@ -856,8 +883,10 @@ void test_get_authenticator_data_one_key(void **state)
 
     will_return(__wrap_fido_dev_info_path, TEST_PATH);
     will_return(__wrap_fido_dev_open, FIDO_OK);
+    will_return(__wrap_fido_dev_is_fido2, true);
+    will_return(__wrap_fido_dev_get_assert, FIDO_OK);
 
-    ret = select_device(ts->dev_list, 1, ts->assert, &dev);
+    ret = select_device(ACTION_AUTHENTICATE, ts->dev_list, 1, ts->assert, &dev);
 
     assert_int_equal(ret, FIDO_OK);
     assert_non_null(dev);
@@ -882,7 +911,7 @@ void test_get_authenticator_data_multiple_keys_assert_found(void **state)
     will_return(__wrap_fido_dev_is_fido2, true);
     will_return(__wrap_fido_dev_get_assert, FIDO_OK);
 
-    ret = select_device(ts->dev_list, 2, ts->assert, &dev);
+    ret = select_device(ACTION_AUTHENTICATE, ts->dev_list, 2, ts->assert, &dev);
 
     assert_int_equal(ret, FIDO_OK);
     assert_non_null(dev);
@@ -907,7 +936,7 @@ void test_get_authenticator_data_multiple_keys_assert_not_found(void **state)
     will_return(__wrap_fido_dev_is_fido2, true);
     will_return(__wrap_fido_dev_get_assert, FIDO_ERR_INVALID_SIG);
 
-    ret = select_device(ts->dev_list, 2, ts->assert, &dev);
+    ret = select_device(ACTION_AUTHENTICATE, ts->dev_list, 2, ts->assert, &dev);
 
     assert_int_equal(ret, FIDO_ERR_NOTFOUND);
     assert_null(dev);
@@ -991,22 +1020,28 @@ void test_authenticate_integration(void **state)
     TALLOC_CTX *tmp_ctx;
     struct passkey_data data;
     size_t dev_number = 3;
+    char *key_handle;
+    char *public_key;
     errno_t ret;
 
     tmp_ctx = talloc_new(NULL);
     assert_non_null(tmp_ctx);
+    data.action = ACTION_AUTHENTICATE;
     data.shortname = "user";
     data.domain = "test.com";
-    data.key_handle = talloc_strdup(tmp_ctx, TEST_KEY_HANDLE);
-    data.b64_public_key = talloc_strdup(tmp_ctx, TEST_PUBLIC_KEY);
+    key_handle = talloc_strdup(tmp_ctx, TEST_KEY_HANDLE);
+    public_key = talloc_strdup(tmp_ctx, TEST_PUBLIC_KEY);
+    data.key_handle_list = &key_handle;
+    data.public_key_list = &public_key;
+    data.keys_size = 1;
     data.type = COSE_ES256;
     data.user_verification = FIDO_OPT_FALSE;
+    will_return(__wrap_fido_dev_info_manifest, FIDO_OK);
+    will_return(__wrap_fido_dev_info_manifest, dev_number);
     will_return(__wrap_fido_assert_set_rp, FIDO_OK);
     will_return(__wrap_fido_assert_allow_cred, FIDO_OK);
     will_return(__wrap_fido_assert_set_uv, FIDO_OK);
     will_return(__wrap_fido_assert_set_clientdata_hash, FIDO_OK);
-    will_return(__wrap_fido_dev_info_manifest, FIDO_OK);
-    will_return(__wrap_fido_dev_info_manifest, dev_number);
     for (size_t i = 0; i < (dev_number - 1); i++) {
         will_return(__wrap_fido_dev_info_path, TEST_PATH);
         will_return(__wrap_fido_dev_open, FIDO_OK);

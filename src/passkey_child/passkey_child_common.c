@@ -51,13 +51,62 @@ cose_str_to_int(const char *type, int *out)
     return EOK;
 }
 
+static errno_t
+parse_public_keys_and_handlers(TALLOC_CTX *mem_ctx,
+                               const char *public_keys,
+                               const char *key_handles,
+                               struct passkey_data *_data)
+{
+    TALLOC_CTX *tmp_ctx = NULL;
+    char **pk_list = NULL;
+    char **kh_list = NULL;
+    int pk_num = 0;
+    int kh_num = 0;
+    errno_t ret;
+
+    tmp_ctx = talloc_new(NULL);
+    if (tmp_ctx == NULL) {
+        ERROR("talloc_new() failed\n");
+        return ENOMEM;
+    }
+
+    ret = split_on_separator(tmp_ctx, public_keys, ',', true, true, &pk_list, &pk_num);
+    if (ret != EOK) {
+        ERROR("Incorrectly formatted public keys.\n");
+        goto done;
+    }
+
+    ret = split_on_separator(tmp_ctx, key_handles, ',', true, true, &kh_list, &kh_num);
+    if (ret != EOK) {
+        ERROR("Incorrectly formatted public keys.\n");
+        goto done;
+    }
+
+    if (pk_num != kh_num) {
+        ERROR("The number of public keys and key handles don't match.\n");
+        goto done;
+    }
+
+    _data->public_key_list = talloc_steal(mem_ctx, pk_list);
+    _data->key_handle_list = talloc_steal(mem_ctx, kh_list);
+    _data->keys_size = pk_num;
+
+done:
+    talloc_free(tmp_ctx);
+
+    return ret;
+}
+
 errno_t
-parse_arguments(int argc, const char *argv[], struct passkey_data *data)
+parse_arguments(TALLOC_CTX *mem_ctx, int argc, const char *argv[],
+                struct passkey_data *data)
 {
     int opt;
     int dumpable = 1;
     int debug_fd = -1;
     char *user_verification = NULL;
+    char *public_keys = NULL;
+    char *key_handles = NULL;
     const char *opt_logger = NULL;
     const char *type = NULL;
     poptContext pc;
@@ -68,9 +117,10 @@ parse_arguments(int argc, const char *argv[], struct passkey_data *data)
     data->shortname = NULL;
     data->domain = NULL;
     data->pin = NULL;
-    data->b64_public_key = NULL;
+    data->public_key_list = NULL;
     data->public_key = NULL;
-    data->key_handle = NULL;
+    data->key_handle_list = NULL;
+    data->keys_size = 0;
     data->type = COSE_ES256;
     data->user_verification = FIDO_OPT_OMIT;
     data->debug_libfido2 = false;
@@ -93,9 +143,9 @@ parse_arguments(int argc, const char *argv[], struct passkey_data *data)
          _("Domain"), NULL},
         {"pin", 0, POPT_ARG_STRING, &data->pin, 0,
          _("Passkey PIN"), NULL},
-        {"public-key", 0, POPT_ARG_STRING, &data->b64_public_key, 0,
+        {"public-key", 0, POPT_ARG_STRING, &public_keys, 0,
          _("Public key"), NULL },
-        {"key-handle", 0, POPT_ARG_STRING, &data->key_handle, 0,
+        {"key-handle", 0, POPT_ARG_STRING, &key_handles, 0,
          _("Key handle"), NULL},
         {"type", 0, POPT_ARG_STRING, &type, 0,
          _("COSE type to use"), "es256|rs256|eddsa"},
@@ -174,6 +224,14 @@ parse_arguments(int argc, const char *argv[], struct passkey_data *data)
         }
     }
 
+    if (public_keys != NULL && key_handles != NULL) {
+        ret = parse_public_keys_and_handlers(mem_ctx, public_keys, key_handles,
+                                             data);
+        if (ret != EOK) {
+            goto done;
+        }
+    }
+
     debug_prg_name = talloc_asprintf(NULL, "passkey_child[%d]", getpid());
     if (debug_prg_name == NULL) {
         ERROR("talloc_asprintf failed.\n");
@@ -207,8 +265,12 @@ check_arguments(const struct passkey_data *data)
     DEBUG(SSSDBG_TRACE_FUNC, "action: %d\n", data->action);
     DEBUG(SSSDBG_TRACE_FUNC, "shortname: %s, domain: %s\n",
           data->shortname, data->domain);
-    DEBUG(SSSDBG_TRACE_FUNC, "public_key: %s, key_handle: %s\n",
-          data->b64_public_key, data->key_handle);
+    DEBUG(SSSDBG_TRACE_FUNC, "Number of keys %d\n",
+          data->keys_size);
+    for (int i = 0; i < data->keys_size; i++) {
+        DEBUG(SSSDBG_TRACE_FUNC, "key %d, public_key: %s, key_handle: %s\n",
+              i + 1, data->public_key_list[i], data->key_handle_list[i]);
+    }
     DEBUG(SSSDBG_TRACE_FUNC, "type: %d\n", data->type);
     DEBUG(SSSDBG_TRACE_FUNC, "user_verification: %d\n",
           data->user_verification);
@@ -229,7 +291,7 @@ check_arguments(const struct passkey_data *data)
 
     if (data->action == ACTION_AUTHENTICATE
         && (data->shortname == NULL || data->domain == NULL
-        || data->b64_public_key == NULL || data->key_handle == NULL)) {
+        || data->public_key_list == NULL || data->key_handle_list == NULL)) {
         DEBUG(SSSDBG_OP_FAILURE,
               "Too few arguments for authenticate action.\n");
         ret = ERR_INPUT_PARSE;
@@ -268,15 +330,7 @@ register_key(struct passkey_data *data)
         goto done;
     }
 
-    if (dev_number > 1) {
-        DEBUG(SSSDBG_OP_FAILURE,
-              "Only one device is supported at a time. Aborting.\n");
-        fprintf(stderr, "Only one device is supported at a time. Aborting.\n");
-        ret = EPERM;
-        goto done;
-    }
-
-    ret = select_device(dev_list, 1, NULL, &dev);
+    ret = select_device(data->action, dev_list, dev_number, NULL, &dev);
     if (ret != EOK) {
         goto done;
     }
@@ -387,6 +441,7 @@ authenticate(struct passkey_data *data)
     fido_dev_info_t *dev_list = NULL;
     fido_dev_t *dev = NULL;
     size_t dev_list_len = 0;
+    int count = 0;
     errno_t ret;
 
     dev_list = fido_dev_info_new(DEVLIST_SIZE);
@@ -396,28 +451,48 @@ authenticate(struct passkey_data *data)
         goto done;
     }
 
-    assert = fido_assert_new();
-    if (assert == NULL) {
-        DEBUG(SSSDBG_OP_FAILURE, "fido_assert_new failed.\n");
-        ret = ENOMEM;
-        goto done;
-    }
-
-    DEBUG(SSSDBG_TRACE_FUNC, "Preparing assert request data.\n");
-    ret = prepare_assert(data, assert);
-    if (ret != FIDO_OK) {
-        goto done;
-    }
-
     DEBUG(SSSDBG_TRACE_FUNC, "Checking for devices.\n");
     ret = list_devices(dev_list, &dev_list_len);
     if (ret != EOK) {
         goto done;
     }
 
-    DEBUG(SSSDBG_TRACE_FUNC, "Selecting device.\n");
-    ret = select_device(dev_list, dev_list_len, assert, &dev);
-    if (ret != EOK) {
+    DEBUG(SSSDBG_TRACE_FUNC, "%d key handles provided.\n",
+          data->keys_size);
+
+    while (count < data->keys_size) {
+        DEBUG(SSSDBG_TRACE_FUNC,
+              "Preparing assert request data with key handle %d.\n", count + 1);
+
+        assert = fido_assert_new();
+        if (assert == NULL) {
+            DEBUG(SSSDBG_OP_FAILURE, "fido_assert_new failed.\n");
+            ret = ENOMEM;
+            goto done;
+        }
+
+        DEBUG(SSSDBG_TRACE_FUNC, "Preparing assert request data.\n");
+        ret = prepare_assert(data, count, assert);
+        if (ret != FIDO_OK) {
+            goto done;
+        }
+
+        DEBUG(SSSDBG_TRACE_FUNC, "Selecting device.\n");
+        ret = select_device(data->action, dev_list, dev_list_len, assert, &dev);
+        if (ret == EOK) {
+            /* Key handle found in device */
+            break;
+        }
+
+        if (dev != NULL) {
+            fido_dev_close(dev);
+        }
+        fido_dev_free(&dev);
+        fido_assert_free(&assert);
+        count++;
+    }
+
+    if (dev == NULL) {
         goto done;
     }
 
@@ -442,7 +517,7 @@ authenticate(struct passkey_data *data)
     }
 
     DEBUG(SSSDBG_TRACE_FUNC, "Decoding public key.\n");
-    ret = decode_public_key(data);
+    ret = decode_public_key(data->public_key_list[count], data);
     if (ret != FIDO_OK) {
         goto done;
     }

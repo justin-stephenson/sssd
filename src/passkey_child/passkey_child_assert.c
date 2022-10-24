@@ -87,7 +87,8 @@ done:
 }
 
 errno_t
-prepare_assert(const struct passkey_data *data, fido_assert_t *_assert)
+prepare_assert(const struct passkey_data *data, int index,
+               fido_assert_t *_assert)
 {
     TALLOC_CTX *tmp_ctx = NULL;
     unsigned char *key_handle;
@@ -107,9 +108,10 @@ prepare_assert(const struct passkey_data *data, fido_assert_t *_assert)
         goto done;
     }
 
-    key_handle = sss_base64_decode(tmp_ctx, data->key_handle, &key_handle_len);
+    key_handle = sss_base64_decode(tmp_ctx, data->key_handle_list[index],
+                                   &key_handle_len);
     if (key_handle == NULL) {
-        DEBUG(SSSDBG_OP_FAILURE, "Failed to decode public key.\n");
+        DEBUG(SSSDBG_OP_FAILURE, "Failed to decode key handle.\n");
         ret = ENOMEM;
         goto done;
     }
@@ -152,7 +154,7 @@ reset_public_key(struct passkey_data *_data)
 }
 
 errno_t
-decode_public_key(struct passkey_data *_data)
+decode_public_key(char *b64_public_key, struct passkey_data *_data)
 {
     TALLOC_CTX *tmp_ctx = NULL;
     unsigned char *buf = NULL;
@@ -165,7 +167,7 @@ decode_public_key(struct passkey_data *_data)
         goto done;
     }
 
-    buf = sss_base64_decode(tmp_ctx, _data->b64_public_key, &buf_len);
+    buf = sss_base64_decode(tmp_ctx, b64_public_key, &buf_len);
     if (buf == NULL) {
         DEBUG(SSSDBG_OP_FAILURE, "Failed to decode public key.\n");
         ret = ENOMEM;

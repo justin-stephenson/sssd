@@ -45,9 +45,10 @@ struct passkey_data {
     const char *shortname;
     const char *domain;
     const char *pin;
-    char *b64_public_key;
+    char **public_key_list;
     void *public_key;
-    char *key_handle;
+    char **key_handle_list;
+    int keys_size;
     int type;
     fido_opt_t user_verification;
     bool debug_libfido2;
@@ -56,6 +57,7 @@ struct passkey_data {
 /**
  * @brief Parse arguments
  *
+ * @param[in] mem_ctx Memory context
  * @param[in] argc Number of arguments
  * @param[in] argv Argument list
  * @param[out] data passkey data
@@ -64,7 +66,8 @@ struct passkey_data {
  *         another value on error.
  */
 errno_t
-parse_arguments(int argc, const char *argv[], struct passkey_data *data);
+parse_arguments(TALLOC_CTX *mem_ctx, int argc, const char *argv[],
+                struct passkey_data *data);
 
 /**
  * @brief Check that all the arguments have been set
@@ -128,6 +131,7 @@ list_devices(fido_dev_info_t *dev_list, size_t *dev_number);
 /**
  * @brief Select passkey device
  *
+ * @param[in] action Action to perform with the key
  * @param[in] dev_list passkey device list
  * @param[in] dev_index passkey device index
  * @param[in] assert Assert
@@ -136,8 +140,9 @@ list_devices(fido_dev_info_t *dev_list, size_t *dev_number);
  * @return 0 if the device was opened properly, another value on error.
  */
 errno_t
-select_device(fido_dev_info_t *dev_list, size_t dev_list_len,
-              fido_assert_t *assert, fido_dev_t **_dev);
+select_device(enum action_opt action, fido_dev_info_t *dev_list,
+              size_t dev_list_len, fido_assert_t *assert,
+              fido_dev_t **_dev);
 
 /**
  * @brief Get authenticator data from assert
@@ -305,13 +310,15 @@ set_assert_options(fido_opt_t up, fido_opt_t uv, fido_assert_t *_assert);
  * @brief Prepare assert
  *
  * @param[in] data passkey data
+ * @param[in] count Index for key handle list
  * @param[out] assert Assert
  *
  * @return 0 if the assert was prepared properly,
  *         error code otherwise.
  */
 errno_t
-prepare_assert(const struct passkey_data *data, fido_assert_t *_assert);
+prepare_assert(const struct passkey_data *data, int index,
+               fido_assert_t *_assert);
 
 /**
  * @brief Reset and free public key
@@ -327,13 +334,14 @@ reset_public_key(struct passkey_data *_data);
 /**
  * @brief Decode b64 public key and store it in the data structure
  *
+ * @param[in] b64_public_key Public key in b64
  * @param[out] data passkey data
  *
  * @return 0 if the public key was decoded properly,
  *         error code otherwise.
  */
 errno_t
-decode_public_key(struct passkey_data *_data);
+decode_public_key(char *b64_public_key, struct passkey_data *_data);
 
 /**
  * @brief Get device options and compare with the policy options expectations

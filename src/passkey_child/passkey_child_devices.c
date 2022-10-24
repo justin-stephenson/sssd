@@ -55,8 +55,9 @@ list_devices(fido_dev_info_t *dev_list, size_t *dev_number)
 }
 
 errno_t
-select_device(fido_dev_info_t *dev_list, size_t dev_list_len,
-              fido_assert_t *assert, fido_dev_t **_dev)
+select_device(enum action_opt action, fido_dev_info_t *dev_list,
+              size_t dev_list_len, fido_assert_t *assert,
+              fido_dev_t **_dev)
 {
     fido_dev_t *dev = NULL;
     const char *path;
@@ -67,7 +68,7 @@ select_device(fido_dev_info_t *dev_list, size_t dev_list_len,
         DEBUG(SSSDBG_OP_FAILURE, "No device found. Aborting.\n");
         ret = ENOENT;
         goto done;
-    } else if (dev_list_len == 1) {
+    } else if (action == ACTION_REGISTER && dev_list_len == 1) {
         dev = fido_dev_new();
         if (dev == NULL) {
             DEBUG(SSSDBG_OP_FAILURE, "fido_dev_new failed.\n");
@@ -97,6 +98,12 @@ select_device(fido_dev_info_t *dev_list, size_t dev_list_len,
         }
 
         *_dev = dev;
+    } else if (action == ACTION_REGISTER && dev_list_len > 1) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "Only one device is supported at a time. Aborting.\n");
+        fprintf(stderr, "Only one device is supported at a time. Aborting.\n");
+        ret = EPERM;
+        goto done;
     } else {
         if (assert == NULL) {
             DEBUG(SSSDBG_OP_FAILURE, "assert cannot be NULL.\n");
