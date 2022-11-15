@@ -451,8 +451,8 @@ errno_t sss_authtok_set_oauth2(struct sss_auth_token *tok,
  *               ENOENT if the token is empty
  *               EACCESS if the token is not a password token
  */
-errno_t sss_authtok_get_passkey(struct sss_auth_token *tok,
-                                const char **pin, size_t *len);
+errno_t sss_authtok_get_passkey_pin(struct sss_auth_token *tok,
+                                    const char **pin, size_t *len);
 
 /**
  * @brief Set passkey credentials into an auth token, replacing any previous data.
