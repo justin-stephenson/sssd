@@ -199,8 +199,8 @@ errno_t sss_authtok_get_oauth2(struct sss_auth_token *tok,
     return EINVAL;
 }
 
-errno_t sss_authtok_get_passkey(struct sss_auth_token *tok,
-                                const char **pin, size_t *len)
+errno_t sss_authtok_get_passkey_pin(struct sss_auth_token *tok,
+                                    const char **pin, size_t *len)
 {
     if (!tok) {
         return EINVAL;
