@@ -67,6 +67,7 @@
 
 #define EXP_ACC_MSG _("Permission denied. ")
 #define SRV_MSG     _("Server message: ")
+#define PASSKEY_DEFAULT_PIN_MSG     _("Enter PIN:")
 
 #define DEBUG_MGS_LEN 1024
 #define MAX_AUTHTOK_SIZE (1024*1024)
@@ -251,8 +252,7 @@ static int do_pam_conversation(pam_handle_t *pamh, const int msg_style,
 
     ret=pam_get_item(pamh, PAM_CONV, (const void **) &conv);
     if (ret != PAM_SUCCESS) return ret;
-    if (conv == NULL || conv->conv == NULL) {
-        logger(pamh, LOG_ERR, "No conversation function");
+    if (conv == NULL || conv->conv == NULL) { logger(pamh, LOG_ERR, "No conversation function");
         return PAM_SYSTEM_ERR;
     }
 
@@ -1766,6 +1766,100 @@ static int prompt_oauth2(pam_handle_t *pamh, struct pam_items *pi)
     return PAM_SUCCESS;
 }
 
+static int prompt_passkey(pam_handle_t *pamh, struct pam_items *pi,
+                          const char *prompt_interactive, const char *prompt_touch)
+{
+    int ret;
+    const struct pam_conv *conv;
+    const struct pam_message *mesg[3] = { NULL, NULL, NULL };
+    struct pam_message m[3] = { {0}, {0}, {0} };
+    struct pam_response *resp = NULL;
+    int pin_idx = 0;
+    int msg_idx = 0;
+
+    ret = pam_get_item(pamh, PAM_CONV, (const void **) &conv);
+    if (ret != PAM_SUCCESS) {
+        return ret;
+    }
+    if (conv == NULL || conv->conv == NULL) {
+        logger(pamh, LOG_ERR, "No conversation function");
+        return PAM_SYSTEM_ERR;
+    }
+
+	/* Interactive, prompt a message and wait before continuing */
+    if ((strcmp(prompt_interactive, "")) != 0) {
+	    m[msg_idx].msg_style = PAM_PROMPT_ECHO_OFF;
+	    m[msg_idx].msg = prompt_interactive;
+	    msg_idx++;
+    }
+
+    /* Prompt for PIN, always */
+    m[msg_idx].msg_style = PAM_PROMPT_ECHO_OFF;
+    m[msg_idx].msg = PASSKEY_DEFAULT_PIN_MSG;
+    pin_idx = msg_idx;
+    msg_idx++;
+
+    /* Prompt to remind the user to touch the device */
+    if ((strcmp(prompt_touch, "") != 0)) {
+        m[msg_idx].msg_style = PAM_TEXT_INFO;
+	    m[msg_idx].msg = prompt_touch;
+        msg_idx++;
+    }
+
+    mesg[0] = (const struct pam_message *) m;
+    /* The following assignment might look a bit odd but is recommended in the
+     * pam_conv man page to make sure that the second argument of the PAM
+     * conversation function can be interpreted in two different ways.
+     * Basically it is important that both the actual struct pam_message and
+     * the pointers to the struct pam_message are arrays. Since the assignment
+     * makes clear that mesg[] and (*mesg)[] are arrays it should be kept this
+     * way and not be replaced by other equivalent assignments. */
+    for (int i = 1; i < msg_idx; i++) {
+        mesg[i] = & (( *mesg )[i]);
+    }
+
+    ret = conv->conv(msg_idx, mesg, &resp, conv->appdata_ptr);
+    if (ret != PAM_SUCCESS) {
+        D(("Conversation failure: %s.", pam_strerror(pamh, ret)));
+        return ret;
+    }
+
+    if (resp == NULL) {
+        D(("response expected, but resp==NULL"));
+        return PAM_SYSTEM_ERR;
+    }
+
+    if (resp[pin_idx].resp == NULL) {
+	pi->pam_authtok = NULL;
+	pi->pam_authtok_type = SSS_AUTHTOK_TYPE_EMPTY;
+	pi->pam_authtok_size=0;
+    } else {
+	pi->pam_authtok = strdup(resp[pin_idx].resp);
+	if (pi->pam_authtok == NULL) {
+	    ret = PAM_BUF_ERR;
+	    goto done;
+	}
+	pi->pam_authtok_type = SSS_AUTHTOK_TYPE_PASSKEY;
+	pi->pam_authtok_size=strlen(pi->pam_authtok);
+    }
+
+    ret = PAM_SUCCESS;
+
+done:
+    if (resp != NULL) {
+        if (resp[pin_idx].resp != NULL) {
+            _pam_overwrite((void *)resp[pin_idx].resp);
+            free(resp[pin_idx].resp);
+        }
+
+        free(resp);
+        resp = NULL;
+    }
+
+    return ret;
+}
+
+
 #define SC_PROMPT_FMT "PIN for %s: "
 
 #ifndef discard_const
@@ -2271,6 +2365,11 @@ static int prompt_by_config(pam_handle_t *pamh, struct pam_items *pi)
         case PC_TYPE_2FA_SINGLE:
             ret = prompt_2fa_single(pamh, pi,
                                     pc_get_2fa_single_prompt(pi->pc[c]));
+            break;
+        case PC_TYPE_PASSKEY:
+            ret = prompt_passkey(pamh, pi,
+                               pc_get_passkey_inter_prompt(pi->pc[c]),
+                               pc_get_passkey_touch_prompt(pi->pc[c]));
             break;
         case PC_TYPE_SC_PIN:
             ret = prompt_sc_pin(pamh, pi);
