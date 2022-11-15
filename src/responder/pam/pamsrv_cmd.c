@@ -2303,6 +2303,14 @@ static void pam_forwarder_passkey_cb(struct tevent_req *req)
         return;
     }
 
+    ret = pam_add_response(preq->pd, SSS_PASSKEY_PROMPTING, 0, NULL);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "pam_add_response failed.\n");
+        preq->pd->pam_status = PAM_AUTHINFO_UNAVAIL;
+        pam_reply(preq);
+        return;
+    }
+
     preq->pd->pam_status = PAM_SUCCESS;
     pam_reply(preq);
 
