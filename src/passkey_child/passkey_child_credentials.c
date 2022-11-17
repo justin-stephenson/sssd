@@ -162,8 +162,6 @@ passkey_recv_pin(TALLOC_CTX *mem_ctx, int fd, char **_pin)
         return EINVAL;
     }
 
-    /* Remove the end of line '\n' character */
-    len--;
     str = talloc_strndup(mem_ctx, (char *) buf, len);
     if (str == NULL) {
         DEBUG(SSSDBG_CRIT_FAILURE, "talloc_strndup failed.\n");
