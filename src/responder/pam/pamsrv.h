@@ -159,12 +159,18 @@ int pam_cmd_gssapi_init(struct cli_ctx *cli_ctx);
 int pam_cmd_gssapi_sec_ctx(struct cli_ctx *cctx);
 
 struct passkey_auth_data;
+struct pk_child_user_data {
+    const char *public_key;
+    const char *key_handle;
+    const char *user_verification;
+};
 struct tevent_req *pam_passkey_auth_send(TALLOC_CTX *mem_ctx,
                                        struct tevent_context *ev,
                                        int timeout,
                                        bool debug_libfido2,
                                        const char *verify_opts,
-                                       struct pam_data *pd);
+                                       struct pam_data *pd,
+                                       struct pk_child_user_data *pk_data);
 errno_t pam_passkey_auth_recv(struct tevent_req *req, TALLOC_CTX *mem_ctx,
                             struct passkey_auth_data *passkey_data);
 bool may_do_passkey_auth(struct pam_ctx *pctx);

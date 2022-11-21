@@ -140,7 +140,8 @@ pam_passkey_auth_send(TALLOC_CTX *mem_ctx,
                     int timeout,
                     bool debug_libfido2,
                     const char *verify_opts,
-                    struct pam_data *pd)
+                    struct pam_data *pd,
+                    struct pk_child_user_data *pk_data)
 {
     struct tevent_req *req;
     struct pam_passkey_auth_send_state *state;
@@ -201,9 +202,9 @@ pam_passkey_auth_send(TALLOC_CTX *mem_ctx,
     }
 
     /* Options retrieved from LDAP */
-    state->extra_args[arg_c++] = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENNqrxcBrbgvlAQYHi5mHCHSBaO8wBcwBDmufTf5Bnw2C8VSDHnYgt4WxDQOmigdlWPVTqLSjhLprETOUOQQwvQ==";
+    state->extra_args[arg_c++] = pk_data->public_key;
     state->extra_args[arg_c++] = "--public-key";
-    state->extra_args[arg_c++] = "Y4dDZcwFGoN6/cJA386eoRFTWQwefF+2TyGCRTkzyjmRLZaODLEfpJPYnKGPW+SGudvTpbbYYeDbrBko/3g9+Q==";
+    state->extra_args[arg_c++] = pk_data->key_handle;
     state->extra_args[arg_c++] = "--key-handle";
     state->extra_args[arg_c++] = "test.com";
     state->extra_args[arg_c++] = "--domain";

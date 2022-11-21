@@ -42,6 +42,7 @@ enum pam_verbosity {
 };
 
 #define DEFAULT_PAM_VERBOSITY PAM_VERBOSITY_IMPORTANT
+#define PASSKEY_PREFIX "passkey:"
 
 struct pam_initgroup_enum_str {
     enum pam_initgroups_scheme scheme;
@@ -54,6 +55,7 @@ struct pam_initgroup_enum_str pam_initgroup_enum_str[] = {
     { PAM_INITGR_ALWAYS, "always" },
     { PAM_INITGR_INVALID, NULL }
 };
+
 
 enum pam_initgroups_scheme pam_initgroups_string_to_enum(const char *str)
 {
@@ -1484,61 +1486,274 @@ static errno_t check_cert(TALLOC_CTX *mctx,
     return EAGAIN;
 }
 
+struct passkey_ctx {
+    struct pam_ctx *pam_ctx;
+    struct tevent_context *ev;
+    struct pam_data *pd;
+    struct pam_auth_req *preq;
+};
+
 static void pam_forwarder_passkey_cb(struct tevent_req *req);
 
-static errno_t check_passkey(TALLOC_CTX *mctx,
+struct tevent_req *pam_passkey_get_mapping_send(TALLOC_CTX *mem_ctx,
+                                                struct tevent_context *ev,
+                                                struct passkey_ctx *pctx);
+void pam_passkey_get_user_done(struct tevent_req *req);
+void pam_passkey_get_mapping_done(struct tevent_req *req);
+errno_t pam_passkey_get_mapping_recv(TALLOC_CTX *mem_ctx,
+                                     struct tevent_req *req,
+                                     struct cache_req_result **_result);
+
+struct passkey_get_mapping_state {
+    struct passkey_ctx pctx;
+    struct cache_req_result *result;
+};
+
+static errno_t check_passkey(TALLOC_CTX *mem_ctx,
                              struct tevent_context *ev,
-                             struct pam_ctx *pctx,
+                             struct pam_ctx *pam_ctx,
                              struct pam_auth_req *preq,
                              struct pam_data *pd)
 {
+    struct tevent_req *req;
+    struct passkey_ctx *pctx;
+
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-check_passkey\n");
+
+    pctx = talloc_zero(ev, struct passkey_ctx);
+    if (pctx == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "pctx == NULL\n");
+        return ENOMEM;
+    }
+
+    pctx->pam_ctx = pam_ctx;
+    pctx->ev = ev;
+    pctx->pd = pd;
+    pctx->preq = preq;
+
+    req = pam_passkey_get_mapping_send(mem_ctx, ev, pctx);
+    if (req == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "pam_passkey_get_mapping_send failed.\n");
+        return ENOMEM;
+    }
+
+    tevent_req_set_callback(req, pam_passkey_get_user_done, pctx);
+    return EAGAIN;
+}
+
+struct tevent_req *pam_passkey_get_mapping_send(TALLOC_CTX *mem_ctx,
+                                                struct tevent_context *ev,
+                                                struct passkey_ctx *pk_ctx)
+{
+
+    struct passkey_get_mapping_state *state;
+    struct tevent_req *req;
+    struct tevent_req *subreq;
+    int ret;
+    static const char *attrs[] = { SYSDB_NAME, SYSDB_USER_PASSKEY, NULL };
+    struct pam_ctx *pam_ctx;
+
+    req = tevent_req_create(mem_ctx, &state, struct passkey_get_mapping_state);
+    if (req == NULL) {
+        ret = ENOMEM;
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-pam_passkey_get_mapping_send\n");
+
+    pam_ctx = pk_ctx->pam_ctx;
+
+    subreq = cache_req_user_by_name_attrs_send(pk_ctx, pk_ctx->ev,
+                                               pam_ctx->rctx,
+                                               pam_ctx->rctx->ncache, 0,
+                                               pk_ctx->pd->domain,
+                                               pk_ctx->pd->user, attrs);
+    if (subreq == NULL) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "Unable to create tevent request!\n");
+        ret = ENOMEM;
+    }
+
+    tevent_req_set_callback(subreq, pam_passkey_get_mapping_done, req);
+
+    return req;
+
+done:
+    tevent_req_error(req, ret);
+    tevent_req_post(req, ev);
+
+    return req;
+}
+
+void pam_passkey_get_mapping_done(struct tevent_req *subreq)
+{
+    struct cache_req_result *result;
+    struct tevent_req *req;
+    struct passkey_get_mapping_state *state;
+
+    errno_t ret;
+
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-get_user_done\n");
+    req = tevent_req_callback_data(subreq, struct tevent_req);
+    state = tevent_req_data(req, struct passkey_get_mapping_state);
+
+    ret = cache_req_user_by_name_attrs_recv(state, subreq, &result);
+    state->result = result;
+
+    talloc_zfree(subreq);
+    if (ret != EOK) {
+        tevent_req_error(req, ret);
+        return;
+    }
+
+    tevent_req_done(req);
+    return;
+}
+
+errno_t pam_passkey_get_mapping_recv(TALLOC_CTX *mem_ctx,
+                                     struct tevent_req *req,
+                                     struct cache_req_result **_result)
+{
+    struct passkey_get_mapping_state *state = NULL;
+
+    state = tevent_req_data(req, struct passkey_get_mapping_state);
+
+    TEVENT_REQ_RETURN_ON_ERROR(req);
+
+    *_result = talloc_steal(mem_ctx, state->result);
+    return EOK;
+}
+
+errno_t process_passkey_data(TALLOC_CTX *mem_ctx,
+                             struct ldb_message *user_mesg,
+                             struct pk_child_user_data *_data)
+{
+    struct ldb_message_element *el;
+    TALLOC_CTX *tmp_ctx;
+    int ret;
+    char **mappings;
+    const char *kh_mapping;
+
+    tmp_ctx = talloc_new(NULL);
+    if (tmp_ctx == NULL) {
+        ERROR("talloc_new() failed\n");
+        return ENOMEM;
+    }
+
+    el = ldb_msg_find_element(user_mesg, SYSDB_USER_PASSKEY);
+    if (el == NULL) {
+        DEBUG(SSSDBG_TRACE_FUNC, "JS-No passkey data found\n");
+        ret = ENOENT;
+        goto done;
+    }
+
+    ret = split_on_separator(tmp_ctx, (const char *) el->values[0].data, ',', true, true,
+                             &mappings, NULL);
+    if (ret != EOK) {
+        ERROR("Incorrectly formatted passkey mapping data.\n");
+        goto done;
+    }
+
+    kh_mapping = talloc_strdup(tmp_ctx, mappings[0] + strlen(PASSKEY_PREFIX));
+    if (kh_mapping == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_strdup failed.\n");
+        ret = ENOMEM;
+        goto done;
+    }
+
+    _data->key_handle = talloc_steal(mem_ctx, kh_mapping);
+    _data->public_key = talloc_steal(mem_ctx, mappings[1]);
+
+    ret = EOK;
+done:
+    talloc_free(tmp_ctx);
+
+    return ret;
+}
+
+void pam_passkey_get_user_done(struct tevent_req *req)
+{
+    int ret;
+    struct passkey_ctx *pctx;
     char *passkey_verification_opts;
     bool debug_libfido2;
     int timeout;
-    errno_t ret;
-    struct tevent_req *req;
+    struct cache_req_result *result;
+    struct pk_child_user_data *pk_data;
 
+    pctx = tevent_req_callback_data(req, struct passkey_ctx);
+
+    ret = pam_passkey_get_mapping_recv(pctx, req, &result);
+    talloc_zfree(req);
+
+    pk_data = talloc_zero(pctx, struct pk_child_user_data);
+    if (!pk_data) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "pk_data == NULL\n");
+        return;
+    }
+
+    /* Get passkey data */
+    ret = process_passkey_data(pk_data, result->msgs[0], pk_data);
+    if (ret == ENOENT) {
+        DEBUG(SSSDBG_TRACE_FUNC, "JS-No passkey data found, skipping passkey auth\n");
+		pctx->preq->pd->pam_status = PAM_AUTHINFO_UNAVAIL;
+		pam_reply(pctx->preq);
+        return;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-get_mapping_done\n");
     /* passkey_verification */
-    ret = confdb_get_string(pctx->rctx->cdb, mctx, CONFDB_MONITOR_CONF_ENTRY,
+    ret = confdb_get_string(pctx->pam_ctx->rctx->cdb, pctx, CONFDB_MONITOR_CONF_ENTRY,
                             CONFDB_MONITOR_PASSKEY_VERIFICATION, NULL,
                             &passkey_verification_opts);
     if (ret != EOK) {
         DEBUG(SSSDBG_CRIT_FAILURE,
             "Failed to read '"CONFDB_MONITOR_PASSKEY_VERIFICATION"' from confdb: [%d]: %s\n",
             ret, sss_strerror(ret));
-        return ret;
+        return;
     }
 
     /* timeout */
-    ret = confdb_get_int(pctx->rctx->cdb, CONFDB_PAM_CONF_ENTRY,
+    ret = confdb_get_int(pctx->pam_ctx->rctx->cdb, CONFDB_PAM_CONF_ENTRY,
                          CONFDB_PAM_PASSKEY_CHILD_TIMEOUT, PASSKEY_CHILD_TIMEOUT_DEFAULT,
                          &timeout);
     if (ret != EOK) {
         DEBUG(SSSDBG_CRIT_FAILURE,
               "Failed to read passkey_child_timeout from confdb: [%d]: %s\n",
               ret, sss_strerror(ret));
-        return ret;
+        return;
     }
 
     /* debug_libfido2 */
-    ret = confdb_get_bool(pctx->rctx->cdb, CONFDB_PAM_CONF_ENTRY,
+    ret = confdb_get_bool(pctx->pam_ctx->rctx->cdb, CONFDB_PAM_CONF_ENTRY,
                          CONFDB_PAM_DEBUG_LIBFIDO2, false,
                          &debug_libfido2);
     if (ret != EOK) {
         DEBUG(SSSDBG_CRIT_FAILURE,
               "Failed to read debug libfido2 from confdb: [%d]: %s\n",
               ret, sss_strerror(ret));
-        return ret;
-    }
-    req = pam_passkey_auth_send(mctx, ev, timeout, debug_libfido2,
-                              passkey_verification_opts, pd);
-    if (req == NULL) {
-        DEBUG(SSSDBG_OP_FAILURE, "pam_passkey_auth_send failed.\n");
-        return ENOMEM;
+        return;
     }
 
-    tevent_req_set_callback(req, pam_forwarder_passkey_cb, preq);
-    return EAGAIN;
+    ret = sysdb_domain_get_passkey_user_verification(pctx,
+                                                     result->domain->sysdb,
+                                                     result->domain->name,
+                                                     &pk_data->user_verification);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+              "Failed to read passkeyUserVerification from sysdb: [%d]: %s\n",
+              ret, sss_strerror(ret));
+        return;
+    }
+
+    req = pam_passkey_auth_send(pctx, pctx->ev, timeout, debug_libfido2,
+                                passkey_verification_opts, pctx->pd, pk_data);
+    if (req == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "pam_passkey_auth_send failed.\n");
+        return;
+    }
+
+    tevent_req_set_callback(req, pam_forwarder_passkey_cb, pctx->preq);
+    return;
 }
 
 
@@ -1991,7 +2206,6 @@ static void pam_forwarder_passkey_cb(struct tevent_req *req)
 {
     struct pam_auth_req *preq = tevent_req_callback_data(req,
                                                          struct pam_auth_req);
-    struct pam_data *pd;
     errno_t ret = EOK;
 
     ret = pam_passkey_auth_recv(req, preq, preq->passkey_data);
@@ -2000,8 +2214,6 @@ static void pam_forwarder_passkey_cb(struct tevent_req *req)
         DEBUG(SSSDBG_OP_FAILURE, "PAM passkey auth failed.\n");
         goto done;
     }
-
-    pd = preq->pd;
 
     ret = pam_add_response(preq->pd, SSS_PASSKEY_PROMPTING, 0, NULL);
     if (ret != EOK) {
