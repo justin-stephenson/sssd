@@ -808,6 +808,7 @@ dist_noinst_HEADERS = \
     src/db/sysdb_ssh.h \
     src/db/sysdb_subid.h \
     src/db/sysdb_domain_resolution_order.h \
+    src/db/sysdb_passkey_user_verification.h \
     src/db/sysdb_computer.h \
     src/db/sysdb_iphosts.h \
     src/db/sysdb_ipnetworks.h \
@@ -1240,6 +1241,7 @@ libsss_util_la_SOURCES = \
     src/db/sysdb_gpo.c \
     src/db/sysdb_certmap.c \
     src/db/sysdb_domain_resolution_order.c \
+    src/db/sysdb_passkey_user_verification.c \
     src/db/sysdb_iphosts.c \
     src/db/sysdb_ipnetworks.c \
     src/util/sss_pam_data.c \
