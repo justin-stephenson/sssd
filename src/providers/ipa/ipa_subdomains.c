@@ -63,6 +63,8 @@
 #define IPA_ENABLED_FLAG "ipaEnabledFlag"
 #define IPA_TRUE_VALUE "TRUE"
 #define IPA_ASSOCIATED_DOMAIN "associatedDomain"
+#define IPA_PASSKEY_VERIFICATION "ipaRequireUserVerification"
+#define IPA_PASSKEY_CONFIG_FILTER "cn=passkeyconfig"
 
 #define OBJECTCLASS "objectClass"
 
@@ -1181,6 +1183,121 @@ done:
 }
 
 static errno_t ipa_subdomains_certmap_recv(struct tevent_req *req)
+{
+    TEVENT_REQ_RETURN_ON_ERROR(req);
+
+    return EOK;
+}
+
+struct ipa_subdomains_passkey_state {
+    struct sss_domain_info *domain;
+    struct sdap_options *sdap_opts;
+};
+
+static void ipa_subdomains_passkey_done(struct tevent_req *subreq);
+
+static struct tevent_req *
+ipa_subdomains_passkey_send(TALLOC_CTX *mem_ctx,
+                           struct tevent_context *ev,
+                           struct ipa_subdomains_ctx *sd_ctx,
+                           struct sdap_handle *sh)
+{
+    struct ipa_subdomains_passkey_state *state;
+    struct tevent_req *subreq;
+    struct tevent_req *req;
+    errno_t ret;
+    const char *attrs[] = { IPA_PASSKEY_VERIFICATION, NULL };
+
+    req = tevent_req_create(mem_ctx, &state,
+                            struct ipa_subdomains_passkey_state);
+    if (req == NULL) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "tevent_req_create() failed\n");
+        return NULL;
+    }
+
+    state->domain = sd_ctx->be_ctx->domain;
+    state->sdap_opts = sd_ctx->sdap_id_ctx->opts;
+
+    subreq = ipa_get_config_send(state, ev, sh, sd_ctx->sdap_id_ctx->opts,
+                                 state->domain->name, attrs, IPA_PASSKEY_CONFIG_FILTER, NULL);
+
+    if (subreq == NULL) {
+        ret = ENOMEM;
+        goto immediately;
+    }
+
+    tevent_req_set_callback(subreq, ipa_subdomains_passkey_done, req);
+
+    ret = EOK;
+
+    return req;
+
+immediately:
+    tevent_req_error(req, ret);
+    tevent_req_post(req, ev);
+
+    return req;
+}
+
+static void ipa_subdomains_passkey_done(struct tevent_req *subreq)
+{
+    struct ipa_subdomains_passkey_state *state;
+    struct tevent_req *req;
+    struct sysdb_attrs *config;
+    const char *user_verification = NULL;
+    errno_t ret;
+
+    req = tevent_req_callback_data(subreq, struct tevent_req);
+    state = tevent_req_data(req, struct ipa_subdomains_passkey_state);
+
+    ret = ipa_get_config_recv(subreq, state, &config);
+    talloc_zfree(subreq);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "Unable to get data from LDAP [%d]: %s\n",
+                      ret, sss_strerror(ret));
+        goto done;
+    }
+
+    if (config != NULL) {
+        ret = sysdb_attrs_get_string(config, IPA_PASSKEY_VERIFICATION,
+                                     &user_verification);
+        if (ret == EOK) {
+            DEBUG(SSSDBG_TRACE_ALL, "Retrieved [%s] from [%s] attribute.\n",
+                                    user_verification, IPA_PASSKEY_VERIFICATION);
+        }
+        if (ret != EOK && ret != ENOENT) {
+            DEBUG(SSSDBG_OP_FAILURE,
+                  "Failed to get passkey user verification "
+                  "value [%d]: %s\n",
+                  ret, sss_strerror(ret));
+            goto done;
+        } else if (ret == ENOENT) {
+            user_verification = NULL;
+        }
+    }
+
+    ret = sysdb_domain_update_passkey_user_verification(
+                        state->domain->sysdb, state->domain->name,
+                        user_verification);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "sysdb_domain_passkey_user_verification() [%d]: [%s].\n",
+              ret, sss_strerror(ret));
+        goto done;
+    }
+
+    ret = EOK;
+
+done:
+    if (ret != EOK) {
+        tevent_req_error(req, ret);
+        return;
+    }
+
+    tevent_req_done(req);
+}
+
+static errno_t ipa_subdomains_passkey_recv(struct tevent_req *req)
 {
     TEVENT_REQ_RETURN_ON_ERROR(req);
 
@@ -2607,6 +2724,7 @@ static errno_t ipa_subdomains_refresh_retry(struct tevent_req *req);
 static void ipa_subdomains_refresh_connect_done(struct tevent_req *subreq);
 static void ipa_subdomains_refresh_ranges_done(struct tevent_req *subreq);
 static void ipa_subdomains_refresh_certmap_done(struct tevent_req *subreq);
+static void ipa_subdomains_refresh_passkey_done(struct tevent_req *subreq);
 static void ipa_subdomains_refresh_master_done(struct tevent_req *subreq);
 static void ipa_subdomains_refresh_slave_done(struct tevent_req *subreq);
 static void ipa_subdomains_refresh_view_name_done(struct tevent_req *subreq);
@@ -2756,6 +2874,35 @@ static void ipa_subdomains_refresh_certmap_done(struct tevent_req *subreq)
     talloc_zfree(subreq);
     if (ret != EOK) {
         DEBUG(SSSDBG_CRIT_FAILURE, "Failed to read certificate mapping rules "
+              "[%d]: %s\n", ret, sss_strerror(ret));
+        /* Not good, but let's try to continue with other server side options */
+    }
+
+    subreq = ipa_subdomains_passkey_send(state, state->ev, state->sd_ctx,
+                                         sdap_id_op_handle(state->sdap_op));
+    if (subreq == NULL) {
+        tevent_req_error(req, ENOMEM);
+        return;
+    }
+
+    tevent_req_set_callback(subreq, ipa_subdomains_refresh_passkey_done, req);
+    return;
+}
+
+static void ipa_subdomains_refresh_passkey_done(struct tevent_req *subreq)
+{
+
+    struct ipa_subdomains_refresh_state *state;
+    struct tevent_req *req;
+    errno_t ret;
+
+    req = tevent_req_callback_data(subreq, struct tevent_req);
+    state = tevent_req_data(req, struct ipa_subdomains_refresh_state);
+
+    ret = ipa_subdomains_passkey_recv(subreq);
+    talloc_zfree(subreq);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "Unable to get passkey configuration "
               "[%d]: %s\n", ret, sss_strerror(ret));
         /* Not good, but let's try to continue with other server side options */
     }
