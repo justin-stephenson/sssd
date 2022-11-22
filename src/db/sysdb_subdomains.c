@@ -23,6 +23,7 @@
 #include "util/util.h"
 #include "db/sysdb_private.h"
 #include "db/sysdb_domain_resolution_order.h"
+#include "db/sysdb_passkey_user_verification.h"
 
 static errno_t
 check_subdom_config_file(struct confdb_ctx *confdb,
@@ -1515,6 +1516,72 @@ sysdb_domain_update_domain_resolution_order(struct sysdb_ctx *sysdb,
     if (ret != EOK) {
         DEBUG(SSSDBG_OP_FAILURE,
               "sysdb_update_domain_resolution_order() failed [%d]: [%s].\n",
+              ret, sss_strerror(ret));
+        goto done;
+    }
+
+    ret = EOK;
+
+done:
+    talloc_free(tmp_ctx);
+    return ret;
+}
+
+errno_t
+sysdb_domain_get_passkey_user_verification(TALLOC_CTX *mem_ctx,
+                                           struct sysdb_ctx *sysdb,
+                                           const char *domain_name,
+                                           const char **_user_verification)
+{
+    TALLOC_CTX *tmp_ctx;
+    struct ldb_dn *dn;
+    errno_t ret;
+
+    tmp_ctx = talloc_new(NULL);
+    if (tmp_ctx == NULL) {
+        return ENOMEM;
+    }
+
+    dn = ldb_dn_new_fmt(tmp_ctx, sysdb->ldb, SYSDB_DOM_BASE, domain_name);
+    if (dn == NULL) {
+        ret = ENOMEM;
+        goto done;
+    }
+
+    ret = sysdb_get_passkey_user_verification(mem_ctx, sysdb, dn,
+                                              _user_verification);
+
+done:
+    talloc_free(tmp_ctx);
+    return ret;
+}
+
+errno_t
+sysdb_domain_update_passkey_user_verification(struct sysdb_ctx *sysdb,
+                                              const char *domain_name,
+                                              const char *user_verification)
+{
+
+    TALLOC_CTX *tmp_ctx;
+    struct ldb_dn *dn;
+    errno_t ret;
+
+    tmp_ctx = talloc_new(NULL);
+    if (tmp_ctx == NULL) {
+        return ENOMEM;
+    }
+
+    dn = ldb_dn_new_fmt(tmp_ctx, sysdb->ldb, SYSDB_DOM_BASE, domain_name);
+    if (dn == NULL) {
+        ret = ENOMEM;
+        goto done;
+    }
+
+    ret = sysdb_update_passkey_user_verification(sysdb, dn,
+                                                 user_verification);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "sysdb_update_passkey_user_verification() failed [%d]: [%s].\n",
               ret, sss_strerror(ret));
         goto done;
     }
