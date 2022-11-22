@@ -513,6 +513,15 @@ This package provides Kerberos plugins that are required to enable
 authentication against external identity providers. Additionally a helper
 program to handle the OAuth 2.0 Device Authorization Grant is provided.
 
+%package passkey
+Summary: Kerberos plugins for authentication with passkey token
+License: GPLv3+
+Requires: sssd-common = %{version}-%{release}
+
+%description passkey
+This package provides Kerberos plugins that are required to enable
+authentication with passkey token.
+
 %prep
 %autosetup -p1
 
@@ -582,6 +591,10 @@ cp $RPM_BUILD_ROOT/%{_datadir}/sssd-kcm/kcm_default_ccache \
 # Enable krb5 idp plugins by default (when sssd-idp package is installed)
 cp $RPM_BUILD_ROOT/%{_datadir}/sssd/krb5-snippets/sssd_enable_idp \
    $RPM_BUILD_ROOT/%{_sysconfdir}/krb5.conf.d/sssd_enable_idp
+
+# Enable krb5 passkey plugins by default (when sssd-passkey package is installed)
+cp $RPM_BUILD_ROOT/%{_datadir}/sssd/krb5-snippets/sssd_enable_passkey \
+   $RPM_BUILD_ROOT/%{_sysconfdir}/krb5.conf.d/sssd_enable_passkey
 
 # krb5 configuration snippet
 cp $RPM_BUILD_ROOT/%{_datadir}/sssd/krb5-snippets/enable_sssd_conf_dir \
@@ -989,6 +1002,11 @@ done
 %{_libdir}/%{name}/modules/sssd_krb5_idp_plugin.so
 %{_datadir}/sssd/krb5-snippets/sssd_enable_idp
 %config(noreplace) %{_sysconfdir}/krb5.conf.d/sssd_enable_idp
+
+%files passkey
+%{_libdir}/%{name}/modules/sssd_krb5_passkey_plugin.so
+%{_datadir}/sssd/krb5-snippets/sssd_enable_passkey
+%config(noreplace) %{_sysconfdir}/krb5.conf.d/sssd_enable_passkey
 
 %if 0%{?rhel}
 %pre common
