@@ -492,6 +492,7 @@ static void mock_input_pam_ex(TALLOC_CTX *mem_ctx,
                               const char *name,
                               const char *pwd,
                               const char *fa2,
+                              const char *passkey,
                               const char *svc,
                               bool contact_dp)
 {
@@ -528,6 +529,10 @@ static void mock_input_pam_ex(TALLOC_CTX *mem_ctx,
             pi.pam_authtok = (char *) authtok;
             pi.pam_authtok_size = needed_size;
             pi.pam_authtok_type = SSS_AUTHTOK_TYPE_2FA;
+        } else if (passkey != NULL) {
+            pi.pam_authtok = discard_const(pwd);
+            pi.pam_authtok_size = strlen(pi.pam_authtok) + 1;
+            pi.pam_authtok_type = SSS_AUTHTOK_TYPE_PASSKEY;
         } else {
             pi.pam_authtok = discard_const(pwd);
             pi.pam_authtok_size = strlen(pi.pam_authtok) + 1;
@@ -575,9 +580,10 @@ static void mock_input_pam_ex(TALLOC_CTX *mem_ctx,
 static void mock_input_pam(TALLOC_CTX *mem_ctx,
                            const char *name,
                            const char *pwd,
-                           const char *fa2)
+                           const char *fa2,
+                           const char *passkey)
 {
-    return mock_input_pam_ex(mem_ctx, name, pwd, fa2, NULL, false);
+    return mock_input_pam_ex(mem_ctx, name, pwd, fa2, passkey, NULL, false);
 }
 
 static void mock_input_pam_cert(TALLOC_CTX *mem_ctx, const char *name,
@@ -1916,6 +1922,7 @@ static void set_cert_auth_param(struct pam_ctx *pctx, const char *dbpath)
     pam_test_ctx->pctx->cert_auth = true;
     pam_test_ctx->pctx->ca_db = discard_const(dbpath);
 }
+
 
 void test_pam_preauth_cert_nocert(void **state)
 {
@@ -3944,6 +3951,40 @@ void test_pam_prompting_2fa_single_and_service_srv(void **state)
     assert_int_equal(ret, EOK);
 }
 
+static void set_passkey_auth_param(struct pam_ctx *pctx)
+{
+    pam_test_ctx->pctx->passkey_auth = true;
+}
+
+void test_pam_passkey_basic(void **state)
+{
+    int ret;
+
+    set_passkey_auth_param(pam_test_ctx->pctx);
+    /*
+    unsetenv("SOFTHSM2_CONF");
+    mock_input_pam(pam_test_ctx, "pamuser", "1234", NULL);
+
+    mock_input_pam_cert(pam_test_ctx, "pamuser", NULL, NULL, NULL, NULL, NULL,
+                        NULL, NULL, NULL);
+
+    will_return(__wrap_sss_packet_get_cmd, SSS_PAM_PREAUTH);
+    will_return(__wrap_sss_packet_get_body, WRAP_CALL_REAL);
+
+    set_cmd_cb(test_pam_simple_check);
+    ret = sss_cmd_execute(pam_test_ctx->cctx, SSS_PAM_PREAUTH,
+                          pam_test_ctx->pam_cmds);
+    assert_int_equal(ret, EOK);
+
+    // Wait until the test finishes with EOK
+    ret = test_ev_loop(pam_test_ctx->tctx);
+    assert_int_equal(ret, EOK);
+
+    */
+    ret = EOK;
+    assert_int_equal(ret, EOK);
+}
+
 int main(int argc, const char *argv[])
 {
     poptContext pc;
@@ -4142,6 +4183,10 @@ int main(int argc, const char *argv[])
         cmocka_unit_test_setup_teardown(test_pam_preauth_last_crl_another_ca_files,
                                         pam_test_setup, pam_test_teardown),
 #endif /* HAVE_TEST_CA */
+#ifdef BUILD_PASSKEY
+        cmocka_unit_test_setup_teardown(test_pam_passkey_basic,
+                                        pam_test_setup, pam_test_teardown),
+#endif /* HAVE_PASSKEY */
 
         cmocka_unit_test_setup_teardown(test_filter_response,
                                         pam_test_setup, pam_test_teardown),
