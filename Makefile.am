@@ -2615,6 +2615,7 @@ pam_srv_tests_LDFLAGS = \
     -Wl,-wrap,sss_cmd_send_empty \
     -Wl,-wrap,sss_cmd_done \
     -Wl,-wrap,pam_dp_send_req \
+    -Wl,-wrap,execv \
     $(NULL)
 pam_srv_tests_LDADD = \
     $(LIBADD_DL) \
