@@ -114,6 +114,7 @@ struct pam_test_ctx {
     int ncache_hits;
     int exp_pam_status;
     enum prompt_config_type exp_prompt_config_type;
+    const char *exp_touch_prompt;
     struct pam_data *pd;
     bool provider_contacted;
 
@@ -3844,6 +3845,8 @@ void test_not_appsvc_app_dom(void **state)
 #define MY_2FA_SINGLE_PROMPT "my_2fa_single_prompt"
 #define MY_FIRST_PROMPT "my_first_prompt"
 #define MY_SECOND_PROMPT "my_second_prompt"
+#define MY_PASSKEY_INTERACTIVE_PROMPT "my_passkey_interactive_prompt"
+#define MY_PASSKEY_TOUCH_PROMPT "my_passkey_touch_prompt"
 #define MY_SERVICE "my_service"
 
 static int pam_test_setup_pw_prompt(void **state)
@@ -3898,6 +3901,10 @@ static int test_pam_prompt_check(uint32_t status, uint8_t *body, size_t blen)
         assert_string_equal(pc_get_2fa_1st_prompt(pc[0]), MY_FIRST_PROMPT);
         assert_string_equal(pc_get_2fa_2nd_prompt(pc[0]), MY_SECOND_PROMPT);
         break;
+    case PC_TYPE_PASSKEY:
+        assert_string_equal(pc_get_passkey_inter_prompt(pc[0]), MY_PASSKEY_INTERACTIVE_PROMPT);
+        assert_string_equal(pc_get_passkey_touch_prompt(pc[0]), pam_test_ctx->exp_touch_prompt);
+        break;
     default:
         assert_false(true);
     }
@@ -3933,6 +3940,13 @@ static int test_pam_prompt_check(uint32_t status, uint8_t *body, size_t blen)
         assert_int_equal(val8t, 0);
         SAFEALIGN_COPY_UINT8_CHECK(&val8t, body + rp, blen, &rp);
         assert_int_equal(val8t, 0);
+        break;
+    case PC_TYPE_PASSKEY:
+        SAFEALIGN_COPY_UINT32(&val, body + rp, &rp);
+        assert_int_equal(val, SSS_PAM_PASSKEY_INFO);
+        SAFEALIGN_COPY_UINT32(&val, body + rp, &rp);
+        assert_int_equal(val, 5);
+        rp += val;
         break;
     default:
         assert_false(true);
@@ -4095,6 +4109,114 @@ void test_pam_prompting_2fa_single_and_service_srv(void **state)
     will_return(__wrap_sss_packet_get_body, WRAP_CALL_REAL);
 
     pam_test_ctx->exp_prompt_config_type = PC_TYPE_2FA;
+    set_cmd_cb(test_pam_prompt_check);
+
+    ret = sss_cmd_execute(pam_test_ctx->cctx, SSS_PAM_PREAUTH,
+                          pam_test_ctx->pam_cmds);
+    assert_int_equal(ret, EOK);
+
+    /* Wait until the test finishes with EOK */
+    ret = test_ev_loop(pam_test_ctx->tctx);
+    assert_int_equal(ret, EOK);
+}
+
+static int pam_test_setup_passkey_interactive_and_touch_prompt(void **state)
+{
+    int ret;
+
+    struct sss_test_conf_param prompt_params[] = {
+        { "interactive", "true"},
+        { "interactive_prompt", MY_PASSKEY_INTERACTIVE_PROMPT},
+        { "touch", "true"},
+        { "touch_prompt", MY_PASSKEY_TOUCH_PROMPT},
+        { NULL, NULL },             /* Sentinel */
+    };
+
+    ret = pam_test_setup(state);
+    assert_int_equal(ret, EOK);
+
+    ret = add_confdb_params(prompt_params, pam_test_ctx->rctx->cdb, CONFDB_PC_CONF_ENTRY "/" CONFDB_PC_TYPE_PASSKEY);
+    assert_int_equal(ret, EOK);
+
+    return 0;
+}
+
+static int pam_test_setup_passkey_interactive_prompt(void **state)
+{
+    int ret;
+
+    struct sss_test_conf_param prompt_params[] = {
+        { "interactive", "true"},
+        { "interactive_prompt", MY_PASSKEY_INTERACTIVE_PROMPT},
+        { NULL, NULL },             /* Sentinel */
+    };
+
+    ret = pam_test_setup(state);
+    assert_int_equal(ret, EOK);
+
+    ret = add_confdb_params(prompt_params, pam_test_ctx->rctx->cdb, CONFDB_PC_CONF_ENTRY "/" CONFDB_PC_TYPE_PASSKEY);
+    assert_int_equal(ret, EOK);
+
+    return 0;
+}
+
+void test_pam_prompting_passkey_interactive(void **state)
+{
+    int ret;
+    const char *prompt_pin = "true";
+
+    pam_test_ctx->pctx->prompting_config_sections = NULL;
+    pam_test_ctx->pctx->num_prompting_config_sections = 0;
+    ret = confdb_get_sub_sections(pam_test_ctx->pctx, pam_test_ctx->pctx->rctx->cdb, CONFDB_PC_CONF_ENTRY,
+                                  &pam_test_ctx->pctx->prompting_config_sections,
+                                  &pam_test_ctx->pctx->num_prompting_config_sections);
+    assert_int_equal(ret, EOK);
+
+    ret = pam_add_response(pam_test_ctx->pd, SSS_PAM_PASSKEY_INFO, strlen(prompt_pin) + 1,
+                           (const uint8_t *)prompt_pin);
+    assert_int_equal(ret, EOK);
+
+    mock_input_pam(pam_test_ctx, "pamuser", NULL, NULL);
+
+    will_return(__wrap_sss_packet_get_cmd, SSS_PAM_PREAUTH);
+    will_return(__wrap_sss_packet_get_body, WRAP_CALL_REAL);
+
+    pam_test_ctx->exp_prompt_config_type = PC_TYPE_PASSKEY;
+    pam_test_ctx->exp_touch_prompt = "";
+    set_cmd_cb(test_pam_prompt_check);
+
+    ret = sss_cmd_execute(pam_test_ctx->cctx, SSS_PAM_PREAUTH,
+                          pam_test_ctx->pam_cmds);
+    assert_int_equal(ret, EOK);
+
+    /* Wait until the test finishes with EOK */
+    ret = test_ev_loop(pam_test_ctx->tctx);
+    assert_int_equal(ret, EOK);
+}
+
+void test_pam_prompting_passkey_interactive_and_touch(void **state)
+{
+    int ret;
+    const char *prompt_pin = "true";
+
+    pam_test_ctx->pctx->prompting_config_sections = NULL;
+    pam_test_ctx->pctx->num_prompting_config_sections = 0;
+    ret = confdb_get_sub_sections(pam_test_ctx->pctx, pam_test_ctx->pctx->rctx->cdb, CONFDB_PC_CONF_ENTRY,
+                                  &pam_test_ctx->pctx->prompting_config_sections,
+                                  &pam_test_ctx->pctx->num_prompting_config_sections);
+    assert_int_equal(ret, EOK);
+
+    ret = pam_add_response(pam_test_ctx->pd, SSS_PAM_PASSKEY_INFO, strlen(prompt_pin) + 1,
+                           (const uint8_t *)prompt_pin);
+    assert_int_equal(ret, EOK);
+
+    mock_input_pam(pam_test_ctx, "pamuser", NULL, NULL);
+
+    will_return(__wrap_sss_packet_get_cmd, SSS_PAM_PREAUTH);
+    will_return(__wrap_sss_packet_get_body, WRAP_CALL_REAL);
+
+    pam_test_ctx->exp_prompt_config_type = PC_TYPE_PASSKEY;
+    pam_test_ctx->exp_touch_prompt = MY_PASSKEY_TOUCH_PROMPT;
     set_cmd_cb(test_pam_prompt_check);
 
     ret = sss_cmd_execute(pam_test_ctx->cctx, SSS_PAM_PREAUTH,
@@ -4498,6 +4620,10 @@ int main(int argc, const char *argv[])
                                         pam_test_setup_2fa_single_and_service_prompt, pam_test_teardown),
         cmocka_unit_test_setup_teardown(test_pam_prompting_2fa_single_and_service_srv,
                                         pam_test_setup_2fa_single_and_service_prompt, pam_test_teardown),
+        cmocka_unit_test_setup_teardown(test_pam_prompting_passkey_interactive,
+                                        pam_test_setup_passkey_interactive_prompt, pam_test_teardown),
+        cmocka_unit_test_setup_teardown(test_pam_prompting_passkey_interactive_and_touch,
+                                        pam_test_setup_passkey_interactive_and_touch_prompt, pam_test_teardown),
     };
 
     /* Set debug level to invalid value so we can decide if -d 0 was used. */
