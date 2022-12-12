@@ -3844,7 +3844,11 @@ test_passkey_LDFLAGS = \
     -Wl,-wrap,fido_assert_set_clientdata_hash \
     -Wl,-wrap,fido_dev_get_assert \
     -Wl,-wrap,fido_dev_is_fido2 \
-    -Wl,-wrap,fido_assert_verify
+    -Wl,-wrap,fido_assert_verify \
+    -Wl,-wrap,fido_assert_authdata_ptr \
+    -Wl,-wrap,fido_assert_authdata_len \
+    -Wl,-wrap,fido_assert_sig_ptr \
+    -Wl,-wrap,fido_assert_sig_len
 test_passkey_LDADD = \
     $(CMOCKA_LIBS) \
     $(SSSD_LIBS) \
@@ -3852,6 +3856,7 @@ test_passkey_LDADD = \
     $(LIBADD_DL) \
     $(PASSKEY_LIBS) \
     libsss_test_common.la \
+    $(JANSSON_LIBS) \
     $(NULL)
 endif # BUILD_PASSKEY
 
@@ -4776,6 +4781,7 @@ passkey_child_LDADD = \
     $(PASSKEY_LIBS) \
     $(SSSD_INTERNAL_LTLIBS) \
     $(CRYPTO_LIBS) \
+    $(JANSSON_LIBS) \
     $(NULL)
 endif # BUILD_PASSKEY
 
