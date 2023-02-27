@@ -845,6 +845,8 @@ static const char *krb5_child_response_type_to_str(int32_t type)
         return "Keep alive";
     case SSS_PAM_OAUTH2_INFO:
         return "OAuth2 info";
+    case SSS_PAM_PASSKEY_INFO:
+        return "Passkey info";
     }
 
     DEBUG(SSSDBG_MINOR_FAILURE, "Unexpected response type %d\n", type);

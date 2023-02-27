@@ -38,11 +38,14 @@
 #include "util/child_common.h"
 #include "util/find_uid.h"
 #include "util/sss_chain_id.h"
+#include "util/sss_ptr_hash.h"
 #include "src/util/util_errors.h"
+#include "responder/pam/pamsrv_passkey.h"
 #include "providers/backend.h"
 #include "providers/krb5/krb5_auth.h"
 #include "providers/krb5/krb5_utils.h"
 #include "krb5_plugin/idp/idp.h"
+#include "krb5_plugin/passkey/passkey.h"
 #include "sss_cli.h"
 
 #define SSSD_KRB5_CHANGEPW_PRINCIPAL "kadmin/changepw"
@@ -119,6 +122,7 @@ static krb5_context krb5_error_ctx;
 
 static errno_t k5c_attach_otp_info_msg(struct krb5_req *kr);
 static errno_t k5c_attach_oauth2_info_msg(struct krb5_req *kr, struct sss_idp_oauth2 *data);
+static errno_t k5c_attach_passkey_msg(struct krb5_req *kr, struct sss_passkey_challenge *data);
 static errno_t k5c_attach_keep_alive_msg(struct krb5_req *kr);
 static errno_t k5c_recv_data(struct krb5_req *kr, int fd, uint32_t *offline);
 static errno_t k5c_send_data(struct krb5_req *kr, int fd, errno_t error);
@@ -918,7 +922,7 @@ static krb5_error_code answer_idp_oauth2(krb5_context kctx,
 
     /* The answer is arbitrary but we need to provide some since krb5 lib
      * expects it. So we choose the pin. */
-    kerr = krb5_responder_set_answer(kctx, rctx, SSSD_IDP_OAUTH2_QUESTION,
+    kerr = krb5_responder_set_answer(kctx, rctx, SSSD_PASSKEY_QUESTION,
                                      data->user_code);
     if (kerr != 0) {
         DEBUG(SSSDBG_OP_FAILURE, "Unable to set IdP answer [%d]\n", kerr);
@@ -929,6 +933,186 @@ static krb5_error_code answer_idp_oauth2(krb5_context kctx,
 
 done:
     sss_idp_oauth2_free(data);
+
+    return kerr;
+}
+
+static krb5_error_code passkey_preauth(struct krb5_req *kr,
+                                       struct sss_passkey_challenge *passkey)
+{
+    struct krb5_req *tmpkr = NULL;
+    uint32_t offline;
+    errno_t ret;
+
+    if (passkey->domain == NULL || passkey->credential_id_list == NULL ||
+        passkey->cryptographic_challenge == NULL) {
+        ret = EINVAL;
+        goto done;
+    }
+
+    ret = k5c_attach_passkey_msg(kr, passkey);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "k5c_attach_passkey_info_msg failed.\n");
+        return ret;
+    }
+
+    /* Challenge was presented. We need to continue the authentication
+     * with this exact child process in order to maintain internal Kerberos
+     * state so we are able to respond to this particular challenge. */
+    ret = k5c_attach_keep_alive_msg(kr);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "k5c_attach_keep_alive_msg failed.\n");
+        return ret;
+    }
+
+    tmpkr = talloc_zero(NULL, struct krb5_req);
+    if (tmpkr == NULL) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "talloc_zero failed.\n");
+        ret = ENOMEM;
+        goto done;
+    }
+
+    /* Send reply and wait for next step. */
+    ret = k5c_send_data(kr, STDOUT_FILENO, ret);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "Failed to send reply\n");
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-recv data, should be waiting\n");
+    ret = k5c_recv_data(tmpkr, STDIN_FILENO, &offline);
+    if (ret != EOK) {
+        goto done;
+    }
+
+    ret = krb5_req_update(kr, tmpkr);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "Unable to update krb request [%d]: %s\n",
+              ret, sss_strerror(ret));
+        goto done;
+    }
+
+done:
+    talloc_free(tmpkr);
+    return ret;
+}
+
+static krb5_error_code answer_passkey(krb5_context kctx,
+                                      struct krb5_req *kr,
+                                      krb5_responder_context rctx)
+{
+    enum sss_authtok_type type;
+    struct sss_passkey_message *msg;
+    struct sss_passkey_message *reply_msg;
+    const char *challenge;
+    const char *reply;
+    const char *new_reply;
+    const char *reply_str;
+    enum sss_passkey_phase phase;
+    char *state;
+    const char *final_msg;
+    const char *prompt;
+    const char *key;
+    const char *pin;
+    size_t pin_len;
+    size_t reply_len;
+    krb5_error_code kerr;
+
+    challenge = krb5_responder_get_challenge(kctx, rctx,
+                                             SSSD_PASSKEY_QUESTION);
+    if (challenge == NULL) {
+        return ENOENT;
+    }
+
+    DEBUG(SSSDBG_TRACE_ALL, "JS-challenge: [%s]\n", challenge);
+
+    msg = sss_passkey_message_decode(challenge);
+    if (msg == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "Unable to decode passkey message\n");
+        return EINVAL;
+    }
+    DEBUG(SSSDBG_TRACE_ALL, "JS-phase [%d]\n", msg->phase);
+    DEBUG(SSSDBG_TRACE_ALL, "JS-state [%s]\n", msg->state);
+    DEBUG(SSSDBG_TRACE_ALL, "JS-domain [%s]\n", msg->data.challenge->domain);
+    DEBUG(SSSDBG_TRACE_ALL, "JS-credential_id_list [%s]\n", msg->data.challenge->credential_id_list[0]);
+    DEBUG(SSSDBG_TRACE_ALL, "JS-user_verification [%d]\n", msg->data.challenge->user_verification);
+    DEBUG(SSSDBG_TRACE_ALL, "JS-crypto challenge [%s]\n", msg->data.challenge->cryptographic_challenge);
+
+    if (kr->pd->cmd == SSS_PAM_PREAUTH) {
+        kerr = passkey_preauth(kr, msg->data.challenge);
+        if (kerr != EOK) {
+            goto done;
+        }
+    }
+
+    if (kr->pd->cmd != SSS_PAM_AUTHENTICATE) {
+        DEBUG(SSSDBG_OP_FAILURE, "Unexpected command [%d]\n", kr->pd->cmd);
+        kerr = EINVAL;
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_ALL, "JS-Made it to AUTH [%s]\n", challenge);
+
+    type = sss_authtok_get_type(kr->pd->authtok);
+    if (type != SSS_AUTHTOK_TYPE_PASSKEY_REPLY) {
+        DEBUG(SSSDBG_OP_FAILURE, "Unexpected authentication token type [%s]\n",
+              sss_authtok_type_to_str(type));
+        kerr = EINVAL;
+        goto done;
+    }
+
+    kerr = sss_authtok_get_passkey_reply_msg(kr->pd->authtok, &reply, &reply_len);
+    if (kerr != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "Unexpected command [%d]\n", kr->pd->cmd);
+        goto done;
+    }
+
+
+    DEBUG(SSSDBG_TRACE_ALL, "JS-reply: [%s]\n", reply);
+    phase = SSS_PASSKEY_PHASE_REPLY;
+    state = "ipa_otpd state";
+    reply_msg = sss_passkey_prefix_json_data(phase, state, reply);
+    if (reply_msg == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "Unable to prefix passkey message\n");
+        return EINVAL;
+    }
+
+    reply_str = sss_passkey_message_encode(reply_msg);
+    if (msg == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "Unable to encode passkey message\n");
+        return EINVAL;
+    }
+
+    DEBUG(SSSDBG_TRACE_ALL, "JS-reply_str: [%s]\n", reply_str);
+    
+    /* FIXME: Parse token and make sure credentials matches? 
+    if (strlen(data->user_code) != token_len && strcmp(data->user_code, token) != 0) {
+        DEBUG(SSSDBG_OP_FAILURE, "User code do not match!\n");
+        kerr = EINVAL;
+        goto done;
+    }
+    */
+
+    /* FIXME: Needed?, Does this avoid caching errors in domain log?
+    kerr = pam_add_response(kr->pd, SSS_OTP, 0, NULL);
+    if (kerr != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "pam_add_response failed.\n");
+        goto done;
+    }
+    */
+
+    /* FIXME: */
+
+    kerr = krb5_responder_set_answer(kctx, rctx, SSSD_PASSKEY_QUESTION,
+                                     reply_str);
+    if (kerr != 0) {
+        DEBUG(SSSDBG_OP_FAILURE, "Unable to set passkey answer [%d]\n", kerr);
+        goto done;
+    }
+
+    kerr = EOK;
+
+done:
+    //sss_idp_oauth2_free(data);
 
     return kerr;
 }
@@ -989,6 +1173,8 @@ static krb5_error_code sss_krb5_responder(krb5_context ctx,
                 return answer_pkinit(ctx, kr, rctx);
             } else if (strcmp(question_list[c], SSSD_IDP_OAUTH2_QUESTION) == 0) {
                 return answer_idp_oauth2(ctx, kr, rctx);
+            } else if (strcmp(question_list[c], SSSD_PASSKEY_QUESTION) == 0) {
+                return answer_passkey(ctx, kr, rctx);
             }
         }
     }
@@ -1390,6 +1576,77 @@ static errno_t k5c_attach_oauth2_info_msg(struct krb5_req *kr,
     memcpy(msg + idx, data->user_code, user_code_len);
 
     ret = pam_add_response(kr->pd, SSS_PAM_OAUTH2_INFO, msg_len, msg);
+    talloc_zfree(msg);
+
+    return ret;
+}
+
+static errno_t k5c_attach_passkey_msg(struct krb5_req *kr,
+                                      struct sss_passkey_challenge *data)
+{
+    uint8_t *msg;
+    const char *user_verification;
+    int i;
+    uint8_t *size_msg;
+    size_t msg_len = 0;
+    size_t domain_len = 0;
+    size_t crypto_len = 0;
+    size_t num_creds = 0;
+    size_t cred_len = 0;
+    size_t verification_len = 0;
+    size_t idx = 0;
+    errno_t ret;
+
+    if (data->domain == NULL || data->credential_id_list == NULL ||
+        data->cryptographic_challenge == NULL) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+              "Empty passkey domain, credential id list, or cryptographic "
+              "challenge\n");
+        return EINVAL;
+    }
+
+    user_verification = data->user_verification == 0 ? "false" : "true";
+    verification_len = strlen(user_verification) + 1;
+    msg_len += verification_len;
+
+    crypto_len = strlen(data->cryptographic_challenge) + 1;
+    msg_len += crypto_len;
+
+    domain_len = strlen(data->domain) + 1;
+    msg_len += domain_len;
+
+    /* credentials list size */
+    msg_len += sizeof(uint32_t);
+
+    for (i = 0; data->credential_id_list[i] != NULL; i++) {
+        msg_len += (strlen(data->credential_id_list[i]) + 1);
+    }
+    num_creds = i;
+
+    msg = talloc_zero_size(kr, msg_len);
+    if (msg == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_size failed.\n");
+        return ENOMEM;
+    }
+
+    memcpy(msg + idx, user_verification, verification_len);
+    idx += verification_len;
+
+    memcpy(msg + idx, data->cryptographic_challenge, crypto_len);
+    idx += crypto_len;
+
+    memcpy(msg + idx, data->domain, domain_len);
+    idx += domain_len;
+
+    SAFEALIGN_COPY_UINT32(msg + idx, &num_creds, &idx);
+
+    for (i = 0; data->credential_id_list[i] != NULL; i++) {
+        cred_len = strlen(data->credential_id_list[i]) + 1;
+        memcpy(msg + idx, data->credential_id_list[i], cred_len);
+        idx += cred_len;
+    }
+
+    ret = pam_add_response(kr->pd, SSS_PAM_PASSKEY_INFO, msg_len, msg);
     talloc_zfree(msg);
 
     return ret;
@@ -2685,6 +2942,8 @@ static errno_t unpack_authtok(struct sss_auth_token *tok,
     case SSS_AUTHTOK_TYPE_SC_PIN:
     case SSS_AUTHTOK_TYPE_SC_KEYPAD:
     case SSS_AUTHTOK_TYPE_OAUTH2:
+    case SSS_AUTHTOK_TYPE_PASSKEY:
+    case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
         ret = sss_authtok_set(tok, auth_token_type, (buf + *p),
                               auth_token_length);
         break;
@@ -2755,7 +3014,10 @@ static errno_t unpack_buffer(uint8_t *buf, size_t size,
     SAFEALIGN_COPY_UINT32_CHECK(&use_enterprise_princ, buf + p, size, &p);
     kr->use_enterprise_princ = (use_enterprise_princ == 0) ? false : true;
     SAFEALIGN_COPY_UINT32_CHECK(&len, buf + p, size, &p);
-    if (len > size - p) return EINVAL;
+    if (len > size - p) {
+        DEBUG(SSSDBG_TRACE_LIBS, "JS-len [%d], size -p [%zu]\n", len, size - p);
+        return EINVAL;
+    }
     kr->upn = talloc_strndup(kr, (char *)(buf + p), len);
     if (kr->upn == NULL) return ENOMEM;
     p += len;
@@ -2802,6 +3064,7 @@ static errno_t unpack_buffer(uint8_t *buf, size_t size,
 
         ret = unpack_authtok(pd->authtok, buf, size, &p);
         if (ret) {
+            DEBUG(SSSDBG_TRACE_FUNC, "JS-failed to unpack authtok\n");
             return ret;
         }
 
