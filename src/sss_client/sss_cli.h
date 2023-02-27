@@ -537,11 +537,13 @@ enum response_type {
                             *   - verification_uri_complete
                             *   - user_code
                             */
-    SSS_PAM_PASSKEY_INFO, /**< Indicates that passkey authentication
-                            * is available, including a parameter string
-                            * which dictates whether prompting for PIN is
-                            * needed.
-                            * @param prompt_pin. */
+    SSS_PAM_PASSKEY_INFO, /**< A message containing the passkey parameters
+                            * for the user. The key is the cryptographic challenge
+                            * used as the key to the passkey hash table entry.
+                            * @param
+                            *   - user verification (string)
+                            *   - key (string)
+                            */
 };
 
 /**

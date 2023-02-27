@@ -1278,7 +1278,7 @@ static int eval_response(pam_handle_t *pamh, size_t buflen, uint8_t *buf,
                 }
 
                 free(pi->oauth2_pin);
-                pi->oauth2_pin = strdup((char *) &buf[p + offset]);
+                pi->oauth2_pin = strdup((char *) &buf[p]);
                 if (pi->oauth2_pin == NULL) {
                     D(("strdup failed"));
                     break;
@@ -1286,17 +1286,28 @@ static int eval_response(pam_handle_t *pamh, size_t buflen, uint8_t *buf,
 
                 break;
             case SSS_PAM_PASSKEY_INFO:
-                if (buf[p + (len - 1)] != '\0') {
-                    D(("passkey info does not end with \\0."));
-                    break;
-                }
-
                 free(pi->passkey_prompt_pin);
-                pi->passkey_prompt_pin = strdup((char *) &buf[p]);
+                pi->passkey_prompt_pin = strdup((char *) &buf[p + offset]);
                 if (pi->passkey_prompt_pin == NULL) {
                     D(("strdup failed"));
                     break;
                 }
+
+                offset = strlen(pi->passkey_prompt_pin) + 1;
+                if (offset >= len) {
+                    D(("Passkey message size mismatch"));
+                    free(pi->passkey_prompt_pin);
+                    pi->passkey_prompt_pin = NULL;
+                    break;
+                }
+
+                free(pi->passkey_key);
+                pi->passkey_key = strdup((char *) &buf[p + offset]);
+                if (pi->passkey_key == NULL) {
+                    D(("strdup failed"));
+                    break;
+                }
+
                 break;
             default:
                 D(("Unknown response type [%d]", type));
@@ -1803,6 +1814,10 @@ static int prompt_passkey(pam_handle_t *pamh, struct pam_items *pi,
     struct pam_response *resp = NULL;
     int pin_idx = 0;
     int msg_idx = 0;
+    size_t needed_size;
+
+    logger(pamh, LOG_ERR, "key: [%s]\n", pi->passkey_key);
+    logger(pamh, LOG_ERR, "prompt: [%s]", pi->passkey_prompt_pin ? "true" : "false");
 
     ret = pam_get_item(pamh, PAM_CONV, (const void **) &conv);
     if (ret != PAM_SUCCESS) {
@@ -1868,7 +1883,22 @@ static int prompt_passkey(pam_handle_t *pamh, struct pam_items *pi,
             pi->pam_authtok_type = SSS_AUTHTOK_TYPE_EMPTY;
             pi->pam_authtok_size=0;
         } else {
-            pi->pam_authtok = strdup(resp[pin_idx].resp);
+            sss_auth_passkey_calc_size(pi->passkey_prompt_pin,
+                                       pi->passkey_key,
+                                       resp[pin_idx].resp,
+                                       &needed_size);
+            logger(pamh, LOG_ERR, "needed size: [%zu]", needed_size);
+
+            pi->pam_authtok = malloc(needed_size);
+            if (pi->pam_authtok == NULL) {
+                D(("malloc failed."));
+                ret = PAM_BUF_ERR;
+                goto done;
+            }
+
+            sss_auth_pack_passkey_blob((uint8_t *)pi->pam_authtok,
+                                        pi->passkey_prompt_pin, pi->passkey_key,
+                                        resp[pin_idx].resp);
             if (pi->pam_authtok == NULL) {
                 ret = PAM_BUF_ERR;
                 goto done;
@@ -1881,7 +1911,7 @@ static int prompt_passkey(pam_handle_t *pamh, struct pam_items *pi,
             }
 
 			pi->pam_authtok_type = SSS_AUTHTOK_TYPE_PASSKEY;
-			pi->pam_authtok_size=strlen(pi->pam_authtok);
+			pi->pam_authtok_size = needed_size;
         }
     } else {
         /* user verification = false, SSS_AUTHTOK_TYPE_PASSKEY will be reset to
