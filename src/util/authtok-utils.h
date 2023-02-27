@@ -23,6 +23,7 @@
 #include <talloc.h>
 
 #include "sss_client/sss_cli.h"
+#include "sss_client/pam_message.h"
 
 /**
  * @brief Fill memory buffer with Smartcard authentication blob
@@ -142,4 +143,13 @@ errno_t sss_auth_unpack_sc_blob(TALLOC_CTX *mem_ctx,
  * @return     pointer to 0-terminate PIN string in the memory buffer
  */
 const char *sss_auth_get_pin_from_sc_blob(uint8_t *blob, size_t blob_len);
+/* FIXME: Add comment */
+errno_t sss_auth_pack_passkey_blob(uint8_t *buf,
+                                   const char *prompt,
+                                   const char *key,
+                                   const char *pin);
+errno_t sss_auth_passkey_calc_size(const char *prompt,
+                                   const char *key,
+                                   const char *pin,
+                                   size_t *_passkey_buf_len);
 #endif /*  __AUTHTOK_UTILS_H__ */

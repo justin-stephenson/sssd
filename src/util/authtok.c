@@ -46,6 +46,8 @@ const char *sss_authtok_type_to_str(enum sss_authtok_type type)
         return "OAuth2";
     case SSS_AUTHTOK_TYPE_PASSKEY:
         return "Passkey";
+    case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
+        return "Passkey reply";
     }
 
     DEBUG(SSSDBG_MINOR_FAILURE, "Unknown authtok type %d\n", type);
@@ -71,6 +73,8 @@ size_t sss_authtok_get_size(struct sss_auth_token *tok)
     case SSS_AUTHTOK_TYPE_2FA_SINGLE:
     case SSS_AUTHTOK_TYPE_OAUTH2:
     case SSS_AUTHTOK_TYPE_PASSKEY:
+    case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-size is [%zu]\n", tok->length);
         return tok->length;
     case SSS_AUTHTOK_TYPE_EMPTY:
         return 0;
@@ -109,6 +113,7 @@ errno_t sss_authtok_get_password(struct sss_auth_token *tok,
     case SSS_AUTHTOK_TYPE_2FA_SINGLE:
     case SSS_AUTHTOK_TYPE_OAUTH2:
     case SSS_AUTHTOK_TYPE_PASSKEY:
+    case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
         return EACCES;
     }
 
@@ -137,6 +142,7 @@ errno_t sss_authtok_get_ccfile(struct sss_auth_token *tok,
     case SSS_AUTHTOK_TYPE_2FA_SINGLE:
     case SSS_AUTHTOK_TYPE_OAUTH2:
     case SSS_AUTHTOK_TYPE_PASSKEY:
+    case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
         return EACCES;
     }
 
@@ -165,6 +171,7 @@ errno_t sss_authtok_get_2fa_single(struct sss_auth_token *tok,
     case SSS_AUTHTOK_TYPE_CCFILE:
     case SSS_AUTHTOK_TYPE_OAUTH2:
     case SSS_AUTHTOK_TYPE_PASSKEY:
+    case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
         return EACCES;
     }
 
@@ -193,14 +200,15 @@ errno_t sss_authtok_get_oauth2(struct sss_auth_token *tok,
     case SSS_AUTHTOK_TYPE_CCFILE:
     case SSS_AUTHTOK_TYPE_2FA_SINGLE:
     case SSS_AUTHTOK_TYPE_PASSKEY:
+    case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
         return EACCES;
     }
 
     return EINVAL;
 }
 
-errno_t sss_authtok_get_passkey_pin(struct sss_auth_token *tok,
-                                    const char **pin, size_t *len)
+errno_t sss_authtok_get_passkey_reply_msg(struct sss_auth_token *tok,
+                                          const char **str, size_t *len)
 {
     if (!tok) {
         return EINVAL;
@@ -208,8 +216,8 @@ errno_t sss_authtok_get_passkey_pin(struct sss_auth_token *tok,
     switch (tok->type) {
     case SSS_AUTHTOK_TYPE_EMPTY:
         return ENOENT;
-    case SSS_AUTHTOK_TYPE_PASSKEY:
-        *pin = (const char *)tok->data;
+    case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
+        *str = (const char *)tok->data;
         if (len) {
             *len = tok->length - 1;
         }
@@ -221,6 +229,48 @@ errno_t sss_authtok_get_passkey_pin(struct sss_auth_token *tok,
     case SSS_AUTHTOK_TYPE_CCFILE:
     case SSS_AUTHTOK_TYPE_2FA_SINGLE:
     case SSS_AUTHTOK_TYPE_OAUTH2:
+    case SSS_AUTHTOK_TYPE_PASSKEY:
+        return EACCES;
+    }
+
+    return EINVAL;
+}
+
+errno_t sss_authtok_get_passkey_pin(struct sss_auth_token *tok,
+                                    const char **_pin, size_t *len)
+{
+    int ret;
+    const char *pin = NULL;
+    const char *key = NULL;
+    const char *prompt = NULL;
+    size_t pin_len = 0;
+
+    if (!tok) {
+        return EINVAL;
+    }
+    switch (tok->type) {
+    case SSS_AUTHTOK_TYPE_EMPTY:
+        return ENOENT;
+    case SSS_AUTHTOK_TYPE_PASSKEY:
+        ret = sss_authtok_get_passkey(NULL, tok, &prompt, &key, &pin, &pin_len);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE, "sss_authtok_get_passkey failed.\n");
+            return ret;
+        }
+
+        *_pin = pin;
+        if (len) {
+            *len = pin_len;
+        }
+        return EOK;
+    case SSS_AUTHTOK_TYPE_PASSWORD:
+    case SSS_AUTHTOK_TYPE_2FA:
+    case SSS_AUTHTOK_TYPE_SC_PIN:
+    case SSS_AUTHTOK_TYPE_SC_KEYPAD:
+    case SSS_AUTHTOK_TYPE_CCFILE:
+    case SSS_AUTHTOK_TYPE_2FA_SINGLE:
+    case SSS_AUTHTOK_TYPE_OAUTH2:
+    case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
         return EACCES;
     }
 
@@ -254,6 +304,7 @@ static errno_t sss_authtok_set_string(struct sss_auth_token *tok,
     tok->data[len] = '\0';
     tok->type = type;
     tok->length = size;
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-authtok size: [%zu]\n", size); 
 
     return EOK;
 
@@ -272,6 +323,7 @@ void sss_authtok_set_empty(struct sss_auth_token *tok)
     case SSS_AUTHTOK_TYPE_SC_PIN:
     case SSS_AUTHTOK_TYPE_2FA_SINGLE:
     case SSS_AUTHTOK_TYPE_PASSKEY:
+    case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
     case SSS_AUTHTOK_TYPE_OAUTH2:
         sss_erase_mem_securely(tok->data, tok->length);
         break;
@@ -320,17 +372,20 @@ errno_t sss_authtok_set_oauth2(struct sss_auth_token *tok,
     return sss_authtok_set_string(tok, SSS_AUTHTOK_TYPE_OAUTH2,
                                   "oauth2", str, len);
 }
-errno_t sss_authtok_set_passkey(struct sss_auth_token *tok,
-                               const char *pin, size_t len)
+
+errno_t sss_authtok_set_passkey_reply_msg(struct sss_auth_token *tok,
+                                          const char *str, size_t len)
 {
     sss_authtok_set_empty(tok);
 
-    return sss_authtok_set_string(tok, SSS_AUTHTOK_TYPE_PASSKEY,
-                                  "passkey", pin, len);
+    return sss_authtok_set_string(tok, SSS_AUTHTOK_TYPE_PASSKEY_REPLY,
+                                  "passkey reply", str, len);
 }
 
 static errno_t sss_authtok_set_2fa_from_blob(struct sss_auth_token *tok,
                                              const uint8_t *data, size_t len);
+static errno_t sss_authtok_set_passkey_from_blob(struct sss_auth_token *tok,
+                                                 const uint8_t *data, size_t len);
 
 errno_t sss_authtok_set(struct sss_auth_token *tok,
                         enum sss_authtok_type type,
@@ -352,7 +407,11 @@ errno_t sss_authtok_set(struct sss_auth_token *tok,
     case SSS_AUTHTOK_TYPE_OAUTH2:
         return sss_authtok_set_oauth2(tok, (const char *) data, len);
     case SSS_AUTHTOK_TYPE_PASSKEY:
-        return sss_authtok_set_passkey(tok, (const char *) data, len);
+        DEBUG(SSSDBG_TRACE_FUNC, "JS-set PASSKEY\n");
+        return sss_authtok_set_passkey_from_blob(tok, data, len);
+    case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
+        DEBUG(SSSDBG_TRACE_FUNC, "JS-set PASSKEY REPLY\n");
+        return sss_authtok_set_passkey_reply_msg(tok, (const char *)data, len);
     case SSS_AUTHTOK_TYPE_EMPTY:
         sss_authtok_set_empty(tok);
         return EOK;
@@ -586,6 +645,166 @@ errno_t sss_authtok_set_2fa(struct sss_auth_token *tok,
     tok->type = SSS_AUTHTOK_TYPE_2FA;
 
     return EOK;
+}
+
+errno_t sss_auth_unpack_passkey_blob(TALLOC_CTX *mem_ctx,
+                                     const uint8_t *blob, size_t blob_len,
+                                     char **_prompt,
+                                     char **_key,
+                                     char **_pin)
+{
+    size_t c;
+    char *prompt;
+    char *key;
+    char *pin;
+
+    c = 0;
+
+    prompt = talloc_strdup(mem_ctx, (const char *) blob + c);
+    if (prompt == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_strdup prompt failed.\n");
+        return ENOMEM;
+    }
+    c += strlen(prompt) + 1;
+
+    key = talloc_strdup(mem_ctx, (const char *) blob + c);
+    if (key == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_strdup key failed.\n");
+        return ENOMEM;
+    }
+    c += strlen(key) + 1;
+
+    pin = talloc_strdup(mem_ctx, (const char *) blob + c);
+    if (pin == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_strdup pin failed.\n");
+        return ENOMEM;
+    }
+    /* FIXME: validate blob len matches expected size? */
+
+    *_prompt = prompt;
+    *_key = key;
+    *_pin = pin;
+
+    return EOK;
+}
+
+errno_t sss_authtok_set_passkey(struct sss_auth_token *tok,
+                                const char *prompt,
+                                const char *key,
+                                const char *pin)
+{
+    int ret;
+    size_t needed_size;
+
+    if (tok == NULL) {
+        return EINVAL;
+    }
+
+    sss_authtok_set_empty(tok);
+
+    ret = sss_auth_passkey_calc_size(prompt, key, pin, &needed_size);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "sss_auth_calc_size failed [%d]: [%s].\n",
+              ret, sss_strerror(ret));
+        return ret;
+    }
+
+    tok->data = talloc_size(tok, needed_size);
+    if (tok->data == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_size failed.\n");
+        return ENOMEM;
+    }
+
+    ret = sss_auth_pack_passkey_blob(tok->data, prompt, key, pin);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+              "sss_auth_pack_passkey_blob unexpectedly returned [%d].\n", ret);
+        return EINVAL;
+    }
+
+    tok->length = needed_size;
+    tok->type = SSS_AUTHTOK_TYPE_PASSKEY;
+
+    return EOK;
+}
+
+static errno_t sss_authtok_set_passkey_from_blob(struct sss_auth_token *tok,
+                                                 const uint8_t *data, size_t len)
+{
+    TALLOC_CTX *tmp_ctx;
+    int ret;
+    char *prompt;
+    char *key;
+    char *pin;
+
+    tmp_ctx = talloc_new(NULL);
+    if (tmp_ctx == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_new failed.\n");
+        ret = ENOMEM;
+        goto done;
+    }
+
+    ret = sss_auth_unpack_passkey_blob(tmp_ctx, data, len, &prompt, &key,
+                                       &pin);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "sss_auth_unpack_passkey_blob failed.\n");
+        goto done;
+    }
+
+    ret = sss_authtok_set_passkey(tok, prompt, key, pin);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "sss_authtok_set_passkey failed.\n");
+        goto done;
+    }
+
+    ret = EOK;
+done:
+    talloc_free(tmp_ctx);
+
+    if (ret != EOK) {
+        sss_authtok_set_empty(tok);
+    }
+
+    return ret;
+}
+
+errno_t sss_authtok_get_passkey(TALLOC_CTX *mem_ctx,
+                                struct sss_auth_token *tok,
+                                const char **_prompt,
+                                const char **_key,
+                                const char **_pin,
+                                size_t *_pin_len)
+{
+    char *prompt;
+    char *key;
+    char *pin;
+    size_t len = 0;
+    size_t pin_len = 0;
+    errno_t ret;
+
+    if (!tok) {
+        return EFAULT;
+    }
+    if (tok->type != SSS_AUTHTOK_TYPE_PASSKEY) {
+        return (tok->type == SSS_AUTHTOK_TYPE_EMPTY) ? ENOENT : EACCES;
+    }
+    /* FIXME: no len needed? */
+    ret = sss_auth_unpack_passkey_blob(mem_ctx, tok->data, len, &prompt, &key,
+                                       &pin);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "sss_auth_unpack_passkey_blob failed.\n");
+        goto done;
+    }
+
+    pin_len = strlen(pin);
+ 
+    *_prompt = prompt;
+    *_key = key;
+    *_pin = pin;
+    *_pin_len = pin_len;
+done:
+    return ret;
+
 }
 
 errno_t sss_authtok_set_sc(struct sss_auth_token *tok,

@@ -23,6 +23,7 @@
 #include <errno.h>
 
 #include "sss_client/sss_cli.h"
+#include "sss_client/pam_message.h"
 
 errno_t sss_auth_pack_2fa_blob(const char *fa1, size_t fa1_len,
                                const char *fa2, size_t fa2_len,
@@ -69,6 +70,55 @@ errno_t sss_auth_pack_2fa_blob(const char *fa1, size_t fa1_len,
     c += fa1_len + 1;
 
     memcpy(buf + c, fa2, fa2_len + 1);
+
+    return 0;
+}
+
+errno_t sss_auth_passkey_calc_size(const char *prompt,
+                                   const char *key,
+                                   const char *pin,
+								   size_t *_passkey_buf_len)
+{
+	size_t len = 0;
+
+    if (prompt == NULL || key == NULL || pin == NULL) {
+        return EINVAL;
+    }
+
+	len += strlen(key) + 1;
+	len += strlen(prompt) + 1;
+	len += strlen(pin) + 1;
+
+	*_passkey_buf_len = len;
+
+	return EOK;
+}
+
+errno_t sss_auth_pack_passkey_blob(uint8_t *buf,
+                                   const char *prompt,
+                                   const char *key,
+                                   const char *pin)
+{
+    size_t c;
+    size_t key_len;
+    size_t prompt_len;
+    size_t pin_len;
+
+    c = 0;
+
+    prompt_len = strlen(prompt) + 1;
+    memcpy(buf + c, prompt, prompt_len);
+    //buf[c + key_id_len] = '\0';
+    c += prompt_len;
+
+    key_len = strlen(key) + 1;
+    memcpy(buf + c, key, key_len);
+    //buf[c + key_id_len] = '\0';
+    c += key_len;
+
+    /* Add provided PIN */
+    pin_len = strlen(pin) + 1;
+    memcpy(buf + c, pin, pin_len);
 
     return 0;
 }
