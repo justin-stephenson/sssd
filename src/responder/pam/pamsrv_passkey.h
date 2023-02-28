@@ -35,7 +35,7 @@ enum passkey_user_verification {
 };
 
 struct passkey_auth_data {
-    char *key;
+    const char *key;
     char *name;
 };
 
@@ -46,14 +46,14 @@ errno_t check_passkey(TALLOC_CTX *mem_ctx,
                              struct pam_data *pd);
 
 struct pk_child_user_data {
-    const char *user;
-    const char *domain;
-    int num_passkeys;
-    const char **public_keys;
-    const char **key_handles;
     const char *user_verification;
+    const char *crypto_challenge;
+    const char *domain;
+    size_t num_credentials;
+    const char **credentials;
 };
 
+void pam_forwarder_passkey_cb(struct tevent_req *req);
 struct tevent_req *pam_passkey_auth_send(TALLOC_CTX *mem_ctx,
                                        struct tevent_context *ev,
                                        int timeout,

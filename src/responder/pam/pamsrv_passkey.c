@@ -20,6 +20,7 @@
 */
 
 #include "util/child_common.h"
+#include "util/authtok.h"
 #include "db/sysdb.h"
 #include "db/sysdb_passkey_user_verification.h"
 #include "responder/pam/pamsrv.h"
@@ -62,7 +63,7 @@ struct passkey_ctx {
     struct pam_auth_req *preq;
 };
 
-static void pam_forwarder_passkey_cb(struct tevent_req *req);
+void pam_forwarder_passkey_cb(struct tevent_req *req);
 
 struct tevent_req *pam_passkey_get_mapping_send(TALLOC_CTX *mem_ctx,
                                                 struct tevent_context *ev,
@@ -399,11 +400,13 @@ errno_t process_passkey_data(TALLOC_CTX *mem_ctx,
         ret = ENOMEM;
         goto done;
     }
+    /* FIXME: 
 
     _data->domain = talloc_steal(mem_ctx, domain_name);
     _data->key_handles = talloc_steal(mem_ctx, kh_mappings);
     _data->public_keys = talloc_steal(mem_ctx, public_keys);
     _data->num_passkeys = el->num_values;
+    */
 
     ret = EOK;
 done:
@@ -412,7 +415,7 @@ done:
     return ret;
 }
 
-static void pam_forwarder_passkey_cb(struct tevent_req *req)
+void pam_forwarder_passkey_cb(struct tevent_req *req)
 {
     struct pam_auth_req *preq = tevent_req_callback_data(req,
                                                          struct pam_auth_req);
@@ -427,6 +430,7 @@ static void pam_forwarder_passkey_cb(struct tevent_req *req)
         goto done;
     }
 
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-pk child finished with status [%d]\n", child_status);
     preq->pd->pam_status = PAM_SUCCESS;
     pam_reply(preq);
 
@@ -634,6 +638,40 @@ errno_t get_passkey_child_write_buffer(TALLOC_CTX *mem_ctx,
     return EOK;
 }
 
+static void pam_passkey_child_read(struct tevent_req *subreq)
+{
+    uint8_t *buf;
+    ssize_t buf_len;
+    char *str;
+    struct tevent_req *req = tevent_req_callback_data(subreq,
+                                                      struct tevent_req);
+    struct pam_passkey_auth_send_state *state = tevent_req_data(req, struct pam_passkey_auth_send_state);
+    int ret;
+
+    struct sss_auth_token *tok;
+
+    ret = read_pipe_recv(subreq, state, &buf, &buf_len);
+    talloc_zfree(subreq);
+    if (ret != EOK) {
+        tevent_req_error(req, ret);
+        return;
+    }
+
+    DEBUG(SSSDBG_TRACE_LIBS, "--- passkey child output start---\n"
+                             "%.*s"
+                             "---passkey child output end---\n",
+                             (int) buf_len, buf);
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-buf_len: [%zu]\n", buf_len); 
+    str = malloc(sizeof(char) * buf_len);
+    snprintf(str, buf_len, "%s", buf);
+
+   // sss_authtok_set_passkey_reply_msg(state->pd->authtok, buf, 0);
+    sss_authtok_set_passkey_reply_msg(state->pd->authtok, str, 0);
+
+    tevent_req_done(req);
+    return;
+}
+
 static void passkey_child_write_done(struct tevent_req *subreq)
 {
     struct tevent_req *req = tevent_req_callback_data(subreq,
@@ -652,6 +690,17 @@ static void passkey_child_write_done(struct tevent_req *subreq)
     }
 
     PIPE_FD_CLOSE(state->io->write_to_child_fd);
+
+    /* Read data back from passkey child */
+    subreq = read_pipe_send(state, state->ev, state->io->read_from_child_fd);
+    if (subreq == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "read_pipe_send failed.\n");
+        ret = ERR_RENEWAL_CHILD;
+        return;
+    }
+
+    tevent_req_set_callback(subreq, pam_passkey_child_read, req);
+
 }
 
 struct tevent_req *
@@ -715,6 +764,7 @@ pam_passkey_auth_send(TALLOC_CTX *mem_ctx,
 
 
     /* Options retrieved from LDAP */
+/* FIXME: 
     result_kh = talloc_strdup(state, pk_data->key_handles[0]);
     result_pk = talloc_strdup(state, pk_data->public_keys[0]);
     for (int i = 1; i < pk_data->num_passkeys; i++) {
@@ -742,6 +792,16 @@ pam_passkey_auth_send(TALLOC_CTX *mem_ctx,
     state->extra_args[arg_c++] = state->pd->user;
     state->extra_args[arg_c++] = "--username";
     state->extra_args[arg_c++] = "--authenticate";
+*/
+
+    state->extra_args[arg_c++] = pk_data->crypto_challenge;
+    state->extra_args[arg_c++] = "--cryptographic-challenge";
+    /* FIXME: multiple credentials */
+    state->extra_args[arg_c++] = pk_data->credentials[0];
+    state->extra_args[arg_c++] = "--key-handle";
+    state->extra_args[arg_c++] = pk_data->domain;
+    state->extra_args[arg_c++] = "--domain";
+    state->extra_args[arg_c++] = "--get-assert";
 
     ret = passkey_child_exec(req);
 
@@ -806,9 +866,13 @@ static errno_t passkey_child_exec(struct tevent_req *req)
         sss_fd_nonblocking(state->io->write_to_child_fd);
 
         /* Set up SIGCHLD handler */
+        /*
         ret = child_handler_setup(state->ev, child_pid,
                                   pam_passkey_auth_done, req,
                                   &state->child_ctx);
+        */
+        /* FIXME: above needed for phase 1 pk */
+        ret = child_handler_setup(state->ev, child_pid, NULL, NULL, NULL);
         if (ret != EOK) {
             DEBUG(SSSDBG_OP_FAILURE, "Could not set up child handlers [%d]: %s\n",
                   ret, sss_strerror(ret));

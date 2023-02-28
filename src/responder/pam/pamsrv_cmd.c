@@ -24,6 +24,7 @@
 #include "util/util.h"
 #include "util/auth_utils.h"
 #include "util/find_uid.h"
+#include "util/sss_ptr_hash.h"
 #include "db/sysdb.h"
 #include "confdb/confdb.h"
 #include "responder/common/responder_packet.h"
@@ -97,6 +98,10 @@ static errno_t check_cert(TALLOC_CTX *mctx,
                           struct pam_ctx *pctx,
                           struct pam_auth_req *preq,
                           struct pam_data *pd);
+
+errno_t lookup_passkey_data(struct pam_ctx *pctx,
+                            struct pam_data *pd,
+                            struct pam_auth_req *preq);
 
 int pam_check_user_done(struct pam_auth_req *preq, int ret);
 
@@ -858,6 +863,173 @@ done:
     return ret;
 }
 
+errno_t decode_pam_passkey_msg(TALLOC_CTX *mem_ctx,
+                               uint8_t *buf,
+                               size_t len,
+						       struct pk_child_user_data **_data)
+{
+
+    size_t p = 0;
+    size_t pctr = 0;
+    errno_t ret;
+    size_t offset;
+    struct pk_child_user_data *data = NULL;
+
+    data = talloc_zero(mem_ctx, struct pk_child_user_data);
+	if (data == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "Failed to talloc passkey data.\n");
+        ret = ENOMEM;
+        goto done;
+	}
+
+	data->user_verification = strdup((char *) &buf[p]);
+	if (data->user_verification == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "Failed to strdup passkey prompt.\n");
+        ret = ENOMEM;
+        goto done;
+	}
+
+    offset = strlen(data->user_verification) + 1;
+	if (offset >= len) {
+        DEBUG(SSSDBG_OP_FAILURE, "passkey prompt offset failure.\n");
+        ret = EIO;
+		goto done;
+	}
+
+	data->crypto_challenge = strdup((char *) &buf[p + offset]);
+	if (data->crypto_challenge == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "Failed to strdup passkey challenge.\n");
+        ret = ENOMEM;
+		goto done;
+	}
+
+	offset += strlen(data->crypto_challenge) + 1;
+	if (offset >= len) {
+        DEBUG(SSSDBG_OP_FAILURE, "Failed to strdup passkey challenge.\n");
+        ret = EIO;
+		goto done;
+	}
+
+
+	data->domain = strdup((char *) &buf[p] + offset);
+	if (data->domain == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "Failed to strdup passkey domain.\n");
+        ret = ENOMEM;
+		goto done;
+	}
+
+	offset += strlen(data->domain) + 1;
+	if (offset >= len) {
+        DEBUG(SSSDBG_OP_FAILURE, "passkey domain offset failure.\n");
+        ret = EIO;
+		goto done;
+	}
+
+    SAFEALIGN_COPY_UINT32(&data->num_credentials, &buf[p + offset], &pctr);
+	size_t list_sz = (size_t) data->num_credentials;
+
+    offset += sizeof(uint32_t);
+
+	data->credentials = malloc(list_sz * sizeof(char *));
+
+	for (int i = 0; i < list_sz; i++) {
+		data->credentials[i] = strdup((char *) &buf[p + offset]);
+		if (data->credentials[i] == NULL) {
+            DEBUG(SSSDBG_OP_FAILURE, "Failed to strdup passkey list.\n");
+            ret = ENOMEM;
+            goto done;
+		}
+
+		offset += strlen(data->credentials[i]) + 1;
+	}
+
+    *_data = data;
+
+    ret = EOK;
+done:
+    return ret;
+}
+
+errno_t save_passkey_data(TALLOC_CTX *mem_ctx,
+                          struct pam_ctx *pctx,
+                          struct pk_child_user_data *data,
+                          struct pam_auth_req *preq)
+{
+    char *pk_key;
+    errno_t ret;
+
+    if (pctx->pk_table == NULL) {
+        /* Store on pctx to outlive the request */
+        pctx->pk_table = sss_ptr_hash_create(pctx, NULL, NULL);
+        if (pctx->pk_table == NULL) {
+            return ENOMEM;
+        }
+    }
+
+    pk_key = talloc_asprintf(mem_ctx, "%s", data->crypto_challenge);
+    if (pk_key == NULL) {
+        return ENOMEM;
+    }
+
+    /* FIXME: EEXIST */
+    ret = sss_ptr_hash_add(pctx->pk_table, pk_key, data,
+                           struct pk_child_user_data);
+    if (ret == EEXIST) {
+        DEBUG(SSSDBG_TRACE_FUNC, "JS-pk_table key [%s] already exists\n",
+                                 pk_key);
+    } else if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "Unable to add pk data to hash table "
+              "[%d]: %s\n", ret, sss_strerror(ret));
+    }
+
+    return ret;
+}
+
+errno_t pam_eval_passkey_response(struct pam_ctx *pctx,
+                                  struct pam_data *pd,
+                                  struct pam_auth_req *preq)
+{
+    struct response_data *pk_resp;
+    struct pk_child_user_data *pk_data;
+    errno_t ret;
+
+    pk_resp = pd->resp_list;
+
+    while (pk_resp != NULL) {
+        switch (pk_resp->type) {
+        case SSS_PAM_PASSKEY_INFO:
+            DEBUG(SSSDBG_OP_FAILURE, "JS-Passkey info\n");
+            ret = decode_pam_passkey_msg(pctx, pk_resp->data, pk_resp->len, &pk_data);
+            if (ret != EOK) {
+                DEBUG(SSSDBG_OP_FAILURE, "JS-Failed to decode passkey msg\n");
+                ret = EIO;
+                goto done;
+            }
+            DEBUG(SSSDBG_OP_FAILURE, "JS-num creds [%zu]\n", pk_data->num_credentials);
+            DEBUG(SSSDBG_OP_FAILURE, "JS-creds [%s]\n", pk_data->credentials[0]);
+
+            ret = save_passkey_data(pctx, pctx, pk_data, preq);
+            if (ret == EEXIST) {
+                DEBUG(SSSDBG_OP_FAILURE, "JS-key exists\n");
+                goto done;
+            } else if (ret != EOK) {
+                DEBUG(SSSDBG_OP_FAILURE, "JS-Failed to store passkey msg\n");
+                ret = EIO;
+                goto done;
+            }
+            break;
+        default:
+            break;
+        }
+        pk_resp = pk_resp->next;
+    }
+
+    ret = EOK;
+done:
+
+    return ret;
+}
+
 void pam_reply(struct pam_auth_req *preq)
 {
     struct cli_ctx *cctx;
@@ -1103,6 +1275,14 @@ void pam_reply(struct pam_auth_req *preq)
         if (ret != EOK) {
             DEBUG(SSSDBG_OP_FAILURE, "Failed to add prompting information, "
                                      "using defaults.\n");
+        }
+    }
+
+    if (pd->cmd == SSS_PAM_PREAUTH) {
+        ret = pam_eval_passkey_response(pctx, pd, preq);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE, "Failed to eval passkey response\n");
+            goto done;
         }
     }
 
@@ -1544,6 +1724,15 @@ static int pam_forwarder(struct cli_ctx *cctx, int pam_cmd)
               sss_authtok_type_to_str(sss_authtok_get_type(pd->authtok)));
         ret = ERR_NO_CREDS;
         goto done;
+    }
+    if ((pd->cmd == SSS_PAM_AUTHENTICATE || pd->cmd == SSS_PAM_PREAUTH)) {
+        /* FIXME: if may_do_passkey_auth ? */
+        if (pctx->pk_table != NULL) {
+            ret = lookup_passkey_data(pctx, preq->pd, preq);
+            goto done;
+        } else {
+            DEBUG(SSSDBG_TRACE_FUNC, "JS-key is NULL\n");
+        }
     }
 
     if (may_do_passkey_auth(pctx, pd)) {
@@ -2280,6 +2469,90 @@ static bool pam_can_user_cache_auth(struct sss_domain_info *domain,
     return result;
 }
 
+void lookup_passkey_data_cb(struct tevent_req *req)
+{
+    struct pam_auth_req *preq = tevent_req_callback_data(req,
+                                                         struct pam_auth_req);
+    errno_t ret = EOK;
+    int child_status;
+
+    ret = pam_passkey_auth_recv(req, &child_status);
+    talloc_free(req);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "PAM passkey auth failed [%d]: %s\n",
+                                 ret, sss_strerror(ret));
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-pk child finished with status [%d]\n", child_status);
+
+    pam_check_user_search(preq);
+
+    /*
+    preq->pd->pam_status = PAM_SUCCESS;
+    pam_reply(preq);
+*/
+
+done:
+    pam_check_user_done(preq, ret);
+}
+
+errno_t lookup_passkey_data(struct pam_ctx *pctx,
+                            struct pam_data *pd,
+                            struct pam_auth_req *preq)
+{
+    errno_t ret;
+    const char *prompt;
+    const char *key;
+    const char *pin;
+    size_t pin_len;
+    struct pk_child_user_data *data;
+    struct tevent_req *req;
+
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-lookup pk data\n");
+
+    /* Check if request exists in table, call passkey child */
+    ret = sss_authtok_get_passkey(preq, preq->pd->authtok,
+                                  &prompt, &key, &pin, &pin_len); 
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "Failure to get passkey authtok\n");
+        return EIO;
+    }
+
+    data = sss_ptr_hash_lookup(pctx->pk_table, key,
+                               struct pk_child_user_data);
+    if (data == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "Failed to lookup passkey authtok\n");
+        return EIO;
+    }
+
+    sss_ptr_hash_delete(pctx->pk_table, key, false);
+
+    /* FIXME: */
+    int timeout = 30;
+    bool debug_libfido2 = true;
+    enum passkey_user_verification verification = PAM_PASSKEY_VERIFICATION_ON;
+    
+    req = pam_passkey_auth_send(preq->cctx, preq->cctx->ev, timeout, debug_libfido2,
+                                verification, pd, data);
+    if (req == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "passkey auth send failed [%d]: [%s]\n",
+              ret, sss_strerror(ret));
+        goto done;
+    }
+
+    tevent_req_set_callback(req, lookup_passkey_data_cb, preq);
+
+    ret = EAGAIN;
+
+done:
+
+    return ret;
+
+}
+
 static void pam_dom_forwarder(struct pam_auth_req *preq)
 {
     int ret;
@@ -2324,6 +2597,7 @@ static void pam_dom_forwarder(struct pam_auth_req *preq)
         pam_reply(preq);
         return;
     }
+
 
     if (may_do_cert_auth(pctx, preq->pd) && preq->cert_list != NULL) {
         /* Check if user matches certificate user */
