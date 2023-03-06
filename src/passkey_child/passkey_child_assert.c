@@ -479,15 +479,11 @@ print_assert_data(const char *key_handle, const char *crypto_challenge,
         goto done;
     }
 
-    error = json_object_set_new(root, "passkey", passkey);
-    if (error == -1) {
-        DEBUG(SSSDBG_OP_FAILURE, "json_object_set() failed.\n");
-    }
-
-    string = json_dumps(root, 0);
+    string = json_dumps(passkey, 0);
     if (string == NULL) {
         DEBUG(SSSDBG_OP_FAILURE, "json_dumps() failed.\n");
     }
+
     puts(string);
     free(string);
 
