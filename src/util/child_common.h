@@ -32,7 +32,7 @@
 
 #include "util/util.h"
 
-#define IN_BUF_SIZE         512
+#define IN_BUF_SIZE         1024
 #define CHILD_MSG_CHUNK     256
 
 #define SIGTERM_TO_SIGKILL_TIME 2
