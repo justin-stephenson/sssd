@@ -79,6 +79,11 @@ struct sss_passkey_message {
 void
 sss_passkey_message_free(struct sss_passkey_message *message);
 
+struct sss_passkey_message *
+sss_passkey_prefix_json_data(enum sss_passkey_phase phase,
+                             char *state,
+                             const char *json_str);
+
 char *
 sss_passkey_message_encode(const struct sss_passkey_message *data);
 

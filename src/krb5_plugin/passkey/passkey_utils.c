@@ -324,6 +324,7 @@ sss_passkey_reply_from_json_object(json_t *jobject)
                                   jdata.user_id);
 }
 
+
 static json_t *
 sss_passkey_reply_to_json_object(const struct sss_passkey_reply *data)
 {
@@ -525,6 +526,42 @@ sss_passkey_message_to_json(const struct sss_passkey_message *message)
     json_decref(jroot);
 
     return str;
+}
+
+struct sss_passkey_message *
+sss_passkey_prefix_json_data(enum sss_passkey_phase phase,
+                             char *state,
+                             const char *json_str)
+{
+    int ret;
+    json_error_t jret;
+    json_t *jroot;
+    struct sss_passkey_message *message;
+    void *data;
+
+    if (json_str == NULL) {
+        return NULL;
+    }
+
+    jroot = json_loads(json_str, 0, &jret);
+    if (jroot == NULL) {
+        return NULL;
+    }
+
+    data = sss_passkey_reply_from_json_object(jroot);
+    if (data == NULL) {
+        return NULL;
+    }
+
+    message = sss_passkey_message_init(phase, state, data);
+    if (message == NULL && phase == SSS_PASSKEY_PHASE_CHALLENGE) {
+        sss_passkey_challenge_free(data);
+    } else if (message == NULL && phase == SSS_PASSKEY_PHASE_REPLY) {
+        sss_passkey_reply_free(data);
+    }
+
+    json_decref(jroot);
+    return message;
 }
 
 char *
