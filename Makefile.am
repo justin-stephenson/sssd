@@ -1319,7 +1319,9 @@ endif
 if BUILD_SYSTEMTAP
 libsss_util_la_LIBADD += stap_generated_probes.lo
 endif
+if BUILD_PASSKEY
 libsss_util_la_SOURCES += src/db/sysdb_passkey_user_verification.c
+endif
 libsss_util_la_LDFLAGS = -avoid-version
 
 pkglib_LTLIBRARIES += libsss_semanage.la
@@ -4575,9 +4577,10 @@ if BUILD_SSH
 libsss_ipa_la_SOURCES += src/providers/ipa/ipa_hostid.c
 endif
 
+if BUILD_PASSKEY
 libsss_ipa_la_SOURCES += \
     src/providers/ipa/ipa_subdomains_passkey.c
-
+endif
 
 libsss_ad_la_SOURCES = \
     src/providers/ad/ad_opts.c \
@@ -4660,8 +4663,10 @@ krb5_child_SOURCES = \
     src/sss_client/common.c \
     src/krb5_plugin/common/utils.c \
     src/krb5_plugin/idp/idp_utils.c \
-    src/krb5_plugin/passkey/passkey_utils.c \
     $(NULL)
+if BUILD_PASSKEY
+    krb5_child_SOURCES += src/krb5_plugin/passkey/passkey_utils.c
+endif # BUILD_PASSKEY
 krb5_child_CFLAGS = \
     $(AM_CFLAGS) \
     $(POPT_CFLAGS) \
