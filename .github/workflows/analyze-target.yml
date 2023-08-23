@@ -63,7 +63,8 @@ jobs:
 
     - name: Run covscan
       run: |
-        run-covscan --base-srpm "${{ steps.target.outputs.path }}" --srpm "${{ steps.pr.outputs.path }}" --output-dir logs
+        COVSCAN=run-covscan --base-srpm "${{ steps.target.outputs.path }}" --srpm "${{ steps.pr.outputs.path }}" --output-dir logs
+        for i in {1..3}; do $PROG && break || sleep 10 && echo "Retrying"; done 
 
     - name: Print result
       uses: next-actions/print-logs@master
