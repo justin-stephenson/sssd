@@ -1758,7 +1758,7 @@ class SSSDConfigTestSSSDConfig(unittest.TestCase):
         self.assertFalse(domain.active)
 
         # TODO verify the contents of this domain
-        self.assertTrue(domain.get_option('ldap_id_use_start_tls'))
+        self.assertEqual(domain.get_option('ldap_id_use_start_tls'), 'true')
         self.assertTrue(domain.get_option('ldap_sudo_include_regexp'))
         self.assertTrue(domain.get_option('ldap_autofs_map_master_name'))
 
@@ -1912,11 +1912,11 @@ class SSSDConfigTestSSSDConfig(unittest.TestCase):
 
         # Positive test - Ensure that saved domains retain values
         domain.set_option('ldap_krb5_init_creds', True)
-        domain.set_option('ldap_id_use_start_tls', False)
+        domain.set_option('ldap_id_use_start_tls', 'Try')
         domain.set_option('ldap_user_search_base',
                           'cn=accounts, dc=example, dc=com')
         self.assertTrue(domain.get_option('ldap_krb5_init_creds'))
-        self.assertFalse(domain.get_option('ldap_id_use_start_tls'))
+        self.assertEqual(domain.get_option('ldap_id_use_start_tls'), 'Try')
         self.assertEqual(domain.get_option('ldap_user_search_base'),
                          'cn=accounts, dc=example, dc=com')
 
@@ -1945,7 +1945,7 @@ class SSSDConfigTestSSSDConfig(unittest.TestCase):
 
         domain2 = sssdconfig.get_domain('example.com2')
         self.assertTrue(domain2.get_option('ldap_krb5_init_creds'))
-        self.assertFalse(domain2.get_option('ldap_id_use_start_tls'))
+        self.assertEqual(domain.get_option('ldap_id_use_start_tls'), 'Try')
 
     def testActivateDomain(self):
         sssdconfig = SSSDConfig.SSSDConfig(srcdir + "/etc/sssd.api.conf",

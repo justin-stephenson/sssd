@@ -52,3 +52,19 @@ def test_ldap__change_password(client: Client, ldap: LDAP, modify_mode: str):
 
     assert client.auth.ssh.password(user, new_pass), "Authentication with new correct password failed"
     assert not client.auth.ssh.password(user, old_pass), "Authentication with old incorrect password did not fail"
+
+@pytest.mark.topology(KnownTopology.LDAP)
+def test_ldap__use_start_tls_try_fallback(client: Client, ldap: LDAP):
+    ldap.user('tuser').add()
+    # Configure an incorrect TLS configuration
+    client.sssd.domain["ldap_tls_cacert"] = "badpath.crt"
+    # Fail with start_tls = True
+    client.sssd.domain["ldap_id_use_start_tls"] = "true"
+    client.sssd.start()
+    result = client.tools.id('tuser')
+    assert result is None
+    # Succeed with try TLS fallback
+    client.sssd.domain["ldap_id_use_start_tls"] = "try"
+    client.sssd.restart()
+    result = client.tools.id('tuser')
+    assert result.user.name == "tuser"
