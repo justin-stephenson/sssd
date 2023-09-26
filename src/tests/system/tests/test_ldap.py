@@ -52,3 +52,35 @@ def test_ldap__change_password(client: Client, ldap: LDAP, modify_mode: str):
 
     assert client.auth.ssh.password(user, new_pass), "Authentication with new correct password failed"
     assert not client.auth.ssh.password(user, old_pass), "Authentication with old incorrect password did not fail"
+
+
+@pytest.mark.topology(KnownTopology.LDAP)
+def test_ldap__use_start_tls_allow_fallback(client: Client, ldap: LDAP):
+    """
+    :title: Check that 'allow' start_tls option works
+    :setup:
+        1. Add user to SSSD
+        2. Set incorrect TLS configuration with "ldap_tls_cacert"
+        3. Set ldap_id_use_start_tls to "true"
+        3. Start SSSD
+        4. Set ldap_id_use_start_tls to "allow"
+        5. Restart SSSD
+    :steps:
+        1. Attempt to lookup 'tuser'
+        2. Attempt to lookup 'tuser' again
+    :expectedresults:
+        1. User lookup should fail
+        2. User lookup should succeed
+    :customerscenario: False
+    """
+    ldap.user("tuser").add()
+    client.sssd.domain["ldap_tls_cacert"] = "badpath.crt"
+    client.sssd.domain["ldap_id_use_start_tls"] = "true"
+    client.sssd.start()
+    result = client.tools.id("tuser")
+    assert result is None
+    client.sssd.domain["ldap_id_use_start_tls"] = "allow"
+    client.sssd.restart()
+    result = client.tools.id("tuser")
+    assert result is not None
+    assert result.user.name == "tuser"

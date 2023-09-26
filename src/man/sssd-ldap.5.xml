@@ -914,6 +914,29 @@
                             use <systemitem class="protocol">tls</systemitem> to protect the channel.
                         </para>
                         <para>
+                            Three modes are currently supported:
+                            <itemizedlist>
+                                <listitem>
+                                    <para>
+                                        allow - Attempt startTLS first then fallback
+                                        to connecting without if it fails.
+                                    </para>
+                                </listitem>
+                                <listitem>
+                                    <para>
+                                        true - TLS must be used or the connection
+                                        will fail.
+                                    </para>
+                                </listitem>
+                                <listitem>
+                                    <para>
+                                        false - startTLS will not be attempted, Not
+                                        recommended for security reasons.
+                                    </para>
+                                </listitem>
+                            </itemizedlist>
+                        </para>
+                        <para>
                             Default: false
                         </para>
                     </listitem>

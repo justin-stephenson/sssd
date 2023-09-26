@@ -49,6 +49,7 @@ struct sdap_connect_state {
     struct sdap_handle *sh;
     const char *uri;
     bool use_start_tls;
+    bool retry_no_tls;
 
     struct sdap_op *op;
 
@@ -67,7 +68,8 @@ struct tevent_req *sdap_connect_send(TALLOC_CTX *memctx,
                                      const char *uri,
                                      struct sockaddr *sockaddr,
                                      socklen_t sockaddr_len,
-                                     bool use_start_tls)
+                                     bool use_start_tls,
+                                     bool retry_no_tls)
 {
     struct tevent_req *req;
     struct tevent_req *subreq;
@@ -93,6 +95,7 @@ struct tevent_req *sdap_connect_send(TALLOC_CTX *memctx,
     state->ev = ev;
     state->opts = opts;
     state->use_start_tls = use_start_tls;
+    state->retry_no_tls = retry_no_tls;
 
     state->uri = talloc_asprintf(state, "%s", uri);
     if (!state->uri) {
@@ -319,6 +322,9 @@ static void sdap_sys_connect_done(struct tevent_req *subreq)
 
     DEBUG(SSSDBG_CONF_SETTINGS, "Executing START TLS\n");
 
+    /* If ldap_id_use_start_tls is "allow", retry without TLS next */
+    state->retry_no_tls = true;
+
     lret = ldap_start_tls(state->sh->ldap, NULL, NULL, &msgid);
     if (lret != LDAP_SUCCESS) {
         optret = sss_ldap_get_diagnostic_msg(state, state->sh->ldap,
@@ -460,6 +466,7 @@ struct sdap_connect_host_state {
     char *host;
     int port;
     bool use_start_tls;
+    bool retry_no_tls;
 
     struct sdap_handle *sh;
 };
@@ -566,7 +573,7 @@ static void sdap_connect_host_resolv_done(struct tevent_req *subreq)
 
     subreq = sdap_connect_send(state, state->ev, state->opts,
                                state->uri, sockaddr, sockaddr_len,
-                               state->use_start_tls);
+                               state->use_start_tls, state->retry_no_tls);
     if (subreq == NULL) {
         ret = ENOMEM;
         goto done;
@@ -1486,6 +1493,7 @@ struct sdap_cli_connect_state {
     enum connect_tls force_tls;
     bool do_auth;
     bool use_tls;
+    bool retry_no_tls;
 
     int retry_attempts;
 };
@@ -1506,13 +1514,27 @@ static void sdap_cli_rootdse_auth_done(struct tevent_req *subreq);
 
 static errno_t
 decide_tls_usage(enum connect_tls force_tls, struct dp_option *basic,
-                 const char *uri, bool *_use_tls)
+                 const char *uri, bool *_use_tls, bool *_retry_no_tls)
 {
     bool use_tls = true;
+    bool retry_no_tls = false;
+    const char *id_tls;
 
     switch (force_tls) {
     case CON_TLS_DFL:
-        use_tls = dp_opt_get_bool(basic, SDAP_ID_TLS);
+        id_tls = dp_opt_get_string(basic, SDAP_ID_TLS);
+        if (strcasecmp(id_tls, "allow") == 0) {
+            use_tls = true;
+            retry_no_tls = true;
+        } else if (strcasecmp(id_tls, "true") == 0) {
+            use_tls = true;
+        } else if (strcasecmp(id_tls, "false") == 0) {
+            use_tls = false;
+        } else {
+            DEBUG(SSSDBG_OP_FAILURE, "Invalid ldap_id_use_start_tls value " \
+                                     ": [%s]\n", id_tls);
+            return EINVAL;
+        }
         break;
     case CON_TLS_ON:
         use_tls = true;
@@ -1531,6 +1553,7 @@ decide_tls_usage(enum connect_tls force_tls, struct dp_option *basic,
         use_tls = false;
     }
 
+    *_retry_no_tls = retry_no_tls;
     *_use_tls = use_tls;
     return EOK;
 }
@@ -1610,7 +1633,8 @@ static void sdap_cli_resolve_done(struct tevent_req *subreq)
     }
 
     ret = decide_tls_usage(state->force_tls, state->opts->basic,
-                           state->service->uri, &state->use_tls);
+                           state->service->uri, &state->use_tls,
+                           &state->retry_no_tls);
 
     if (ret != EOK) {
         tevent_req_error(req, EINVAL);
@@ -1621,7 +1645,8 @@ static void sdap_cli_resolve_done(struct tevent_req *subreq)
                                state->service->uri,
                                state->service->sockaddr,
                                state->service->sockaddr_len,
-                               state->use_tls);
+                               state->use_tls,
+                               state->retry_no_tls);
     if (!subreq) {
         tevent_req_error(req, ENOMEM);
         return;
@@ -1641,6 +1666,12 @@ static void sdap_cli_connect_done(struct tevent_req *subreq)
     talloc_zfree(state->sh);
     ret = sdap_connect_recv(subreq, state, &state->sh);
     talloc_zfree(subreq);
+
+    /* We don't need to retry */
+    if (ret == EOK) {
+        state->retry_no_tls = false;
+    }
+
     if (ret == ERR_TLS_HANDSHAKE_INTERRUPTED &&
         state->retry_attempts < MAX_RETRY_ATTEMPTS) {
         DEBUG(SSSDBG_OP_FAILURE,
@@ -1650,7 +1681,30 @@ static void sdap_cli_connect_done(struct tevent_req *subreq)
                                    state->service->uri,
                                    state->service->sockaddr,
                                    state->service->sockaddr_len,
-                                   state->use_tls);
+                                   state->use_tls,
+                                   state->retry_no_tls);
+
+        if (!subreq) {
+            tevent_req_error(req, ENOMEM);
+            return;
+        }
+
+        tevent_req_set_callback(subreq, sdap_cli_connect_done, req);
+        return;
+    } else if (state->retry_no_tls) {
+        DEBUG(SSSDBG_IMPORTANT_INFO, "StartTLS operation failed! Falling back to " \
+                                     "connecting with startTLS disabled. Warning: " \
+                                     "this means network communication is NOT " \
+                                     "protected with TLS.\n");
+        state->use_tls = false;
+        state->retry_no_tls = false;
+
+        subreq = sdap_connect_send(state, state->ev, state->opts,
+                                   state->service->uri,
+                                   state->service->sockaddr,
+                                   state->service->sockaddr_len,
+                                   state->use_tls,
+                                   state->retry_no_tls);
 
         if (!subreq) {
             tevent_req_error(req, ENOMEM);
@@ -1990,7 +2044,8 @@ static errno_t sdap_cli_auth_reconnect(struct tevent_req *req)
     state = tevent_req_data(req, struct sdap_cli_connect_state);
 
     ret = decide_tls_usage(state->force_tls, state->opts->basic,
-                           state->service->uri, &state->use_tls);
+                           state->service->uri, &state->use_tls,
+                           &state->retry_no_tls);
     if (ret != EOK) {
         goto done;
     }
@@ -1999,7 +2054,8 @@ static errno_t sdap_cli_auth_reconnect(struct tevent_req *req)
                                state->service->uri,
                                state->service->sockaddr,
                                state->service->sockaddr_len,
-                               state->use_tls);
+                               state->use_tls,
+                               state->retry_no_tls);
 
     if (subreq == NULL) {
         ret = ENOMEM;
