@@ -40,8 +40,9 @@
             is required. <command>sssd</command> <emphasis>does
             not</emphasis> support authentication over an unencrypted channel.
             If the LDAP server is used only as an identity provider, an encrypted
-            channel is not needed. Please refer to <quote>ldap_access_filter</quote>
-            config option for more information about using LDAP as an access provider.
+            channel is strongly recommended. Please refer to
+            <quote>ldap_access_filter</quote> config option for more information
+            about using LDAP as an access provider.
         </para>
     </refsect1>
 
