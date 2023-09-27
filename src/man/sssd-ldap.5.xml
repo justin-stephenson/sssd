@@ -938,7 +938,7 @@
                             </itemizedlist>
                         </para>
                         <para>
-                            Default: false
+                            Default: allow
                         </para>
                     </listitem>
                 </varlistentry>

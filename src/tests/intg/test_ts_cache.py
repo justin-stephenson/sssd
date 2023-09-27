@@ -161,6 +161,7 @@ def setup_rfc2307bis(request, ldap_conn):
         auth_provider           = ldap
         sudo_provider           = ldap
         ldap_group_object_class = groupOfNames
+        ldap_id_use_start_tls   = allow
         ldap_uri                = {ldap_conn.ds_inst.ldap_url}
         ldap_search_base        = {ldap_conn.ds_inst.base_dn}
     """).format(**locals())
@@ -186,6 +187,7 @@ def setup_rfc2307(request, ldap_conn):
         id_provider             = ldap
         auth_provider           = ldap
         sudo_provider           = ldap
+        ldap_id_use_start_tls   = allow
         ldap_uri                = {ldap_conn.ds_inst.ldap_url}
         ldap_search_base        = {ldap_conn.ds_inst.base_dn}
     """).format(**locals())

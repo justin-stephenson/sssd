@@ -213,6 +213,7 @@ def format_basic_conf(ldap_conn, schema, config):
         ldap_search_base    = {ldap_conn.ds_inst.base_dn}
         ldap_user_extra_attrs = extraName:uid
         ldap_user_certificate = userCert
+        ldap_id_use_start_tls = allow
 
         [application/app]
         inherit_from = LDAP
