@@ -37,13 +37,13 @@
 #include "providers/ipa/ipa_subdomains.h"
 
 static struct tevent_req *
-ipa_srv_ad_acct_send(TALLOC_CTX *mem_ctx,
+ipa_srv_acct_send(TALLOC_CTX *mem_ctx,
                      struct tevent_context *ev,
                      struct ipa_id_ctx *ipa_ctx,
                      struct sysdb_attrs *override_attrs,
                      struct dp_id_data *ar);
 static errno_t
-ipa_srv_ad_acct_recv(struct tevent_req *req, int *dp_error_out);
+ipa_srv_acct_recv(struct tevent_req *req, int *dp_error_out);
 
 struct ipa_subdomain_account_state {
     struct tevent_context *ev;
@@ -337,7 +337,7 @@ static errno_t ipa_subdomain_account_get_original_step(struct tevent_req *req,
     struct tevent_req *subreq;
 
     if (state->ipa_server_mode) {
-        subreq = ipa_srv_ad_acct_send(state, state->ev, state->ipa_ctx,
+        subreq = ipa_srv_acct_send(state, state->ev, state->ipa_ctx,
                                       state->override_attrs, ar);
     } else {
         subreq = ipa_get_subdom_acct_send(state, state->ev, state->ipa_ctx,
@@ -367,7 +367,7 @@ static void ipa_subdomain_account_done(struct tevent_req *subreq)
     struct sss_domain_info *object_dom;
 
     if (state->ipa_server_mode) {
-        ret = ipa_srv_ad_acct_recv(subreq, &dp_error);
+        ret = ipa_srv_acct_recv(subreq, &dp_error);
     } else {
         ret = ipa_get_subdom_acct_recv(subreq, &dp_error);
     }
@@ -784,7 +784,7 @@ ipa_ad_gc_conn_list(TALLOC_CTX *mem_ctx, struct ipa_id_ctx *ipa_ctx,
 }
 
 /* IPA lookup for server mode. Directly to AD. */
-struct ipa_get_ad_acct_state {
+struct ipa_get_acct_state {
     int dp_error;
     struct tevent_context *ev;
     struct ipa_id_ctx *ipa_ctx;
@@ -815,13 +815,13 @@ ipa_get_ad_acct_send(TALLOC_CTX *mem_ctx,
     errno_t ret;
     struct tevent_req *req;
     struct tevent_req *subreq;
-    struct ipa_get_ad_acct_state *state;
+    struct ipa_get_acct_state *state;
     struct sdap_domain *sdom;
     struct sdap_id_conn_ctx **clist;
     struct sdap_id_ctx *sdap_id_ctx;
     struct ad_id_ctx *ad_id_ctx;
 
-    req = tevent_req_create(mem_ctx, &state, struct ipa_get_ad_acct_state);
+    req = tevent_req_create(mem_ctx, &state, struct ipa_get_acct_state);
     if (req == NULL) return NULL;
 
     state->dp_error = -1;
@@ -1278,8 +1278,8 @@ ipa_get_ad_acct_ad_part_done(struct tevent_req *subreq)
 {
     struct tevent_req *req = tevent_req_callback_data(subreq,
                                                 struct tevent_req);
-    struct ipa_get_ad_acct_state *state = tevent_req_data(req,
-                                                struct ipa_get_ad_acct_state);
+    struct ipa_get_acct_state *state = tevent_req_data(req,
+                                                struct ipa_get_acct_state);
     errno_t ret;
     const char *sid;
     struct dp_id_data *ar;
@@ -1372,8 +1372,8 @@ ipa_get_ad_override_done(struct tevent_req *subreq)
 {
     struct tevent_req *req = tevent_req_callback_data(subreq,
                                                 struct tevent_req);
-    struct ipa_get_ad_acct_state *state = tevent_req_data(req,
-                                                struct ipa_get_ad_acct_state);
+    struct ipa_get_acct_state *state = tevent_req_data(req,
+                                                struct ipa_get_acct_state);
     errno_t ret;
 
     ret = ipa_get_ad_override_recv(subreq, &state->dp_error, state,
@@ -1403,8 +1403,8 @@ fail:
 static void ipa_check_ghost_members_done(struct tevent_req *subreq);
 static errno_t ipa_check_ghost_members(struct tevent_req *req)
 {
-    struct ipa_get_ad_acct_state *state = tevent_req_data(req,
-                                                struct ipa_get_ad_acct_state);
+    struct ipa_get_acct_state *state = tevent_req_data(req,
+                                                struct ipa_get_acct_state);
     errno_t ret;
     struct tevent_req *subreq;
     struct ldb_message_element *ghosts = NULL;
@@ -1463,8 +1463,8 @@ static void ipa_check_ghost_members_done(struct tevent_req *subreq)
 
 static errno_t ipa_get_ad_apply_override_step(struct tevent_req *req)
 {
-    struct ipa_get_ad_acct_state *state = tevent_req_data(req,
-                                                struct ipa_get_ad_acct_state);
+    struct ipa_get_acct_state *state = tevent_req_data(req,
+                                                struct ipa_get_acct_state);
     errno_t ret;
     struct tevent_req *subreq;
     const char *obj_name;
@@ -1606,8 +1606,8 @@ static void ipa_id_get_groups_overrides_done(struct tevent_req *subreq)
 
 static errno_t ipa_get_ad_ipa_membership_step(struct tevent_req *req)
 {
-    struct ipa_get_ad_acct_state *state = tevent_req_data(req,
-                                                struct ipa_get_ad_acct_state);
+    struct ipa_get_acct_state *state = tevent_req_data(req,
+                                                struct ipa_get_acct_state);
     struct tevent_req *subreq;
 
     /* For initgroups request we have to check IPA group memberships of AD
@@ -1632,8 +1632,8 @@ ipa_get_ad_acct_done(struct tevent_req *subreq)
 {
     struct tevent_req *req = tevent_req_callback_data(subreq,
                                                 struct tevent_req);
-    struct ipa_get_ad_acct_state *state = tevent_req_data(req,
-                                                struct ipa_get_ad_acct_state);
+    struct ipa_get_acct_state *state = tevent_req_data(req,
+                                                struct ipa_get_acct_state);
     errno_t ret;
 
     ret = ipa_get_ad_memberships_recv(subreq, &state->dp_error);
@@ -1650,10 +1650,10 @@ ipa_get_ad_acct_done(struct tevent_req *subreq)
 }
 
 static errno_t
-ipa_get_ad_acct_recv(struct tevent_req *req, int *dp_error_out)
+ipa_get_acct_recv(struct tevent_req *req, int *dp_error_out)
 {
-    struct ipa_get_ad_acct_state *state = tevent_req_data(req,
-                                                struct ipa_get_ad_acct_state);
+    struct ipa_get_acct_state *state = tevent_req_data(req,
+                                                struct ipa_get_acct_state);
 
     if (dp_error_out) {
         *dp_error_out = state->dp_error;
@@ -1664,7 +1664,7 @@ ipa_get_ad_acct_recv(struct tevent_req *req, int *dp_error_out)
     return EOK;
 }
 
-struct ipa_srv_ad_acct_state {
+struct ipa_srv_acct_state {
     struct tevent_context *ev;
     struct ipa_id_ctx *ipa_ctx;
     struct sysdb_attrs *override_attrs;
@@ -1677,22 +1677,22 @@ struct ipa_srv_ad_acct_state {
     int dp_error;
 };
 
-static int ipa_srv_ad_acct_lookup_step(struct tevent_req *req);
-static void ipa_srv_ad_acct_lookup_done(struct tevent_req *subreq);
-static void ipa_srv_ad_acct_retried(struct tevent_req *subreq);
+static int ipa_srv_acct_lookup_step(struct tevent_req *req);
+static void ipa_srv_acct_lookup_done(struct tevent_req *subreq);
+static void ipa_srv_acct_retried(struct tevent_req *subreq);
 
 static struct tevent_req *
-ipa_srv_ad_acct_send(TALLOC_CTX *mem_ctx,
-                     struct tevent_context *ev,
-                     struct ipa_id_ctx *ipa_ctx,
-                     struct sysdb_attrs *override_attrs,
-                     struct dp_id_data *ar)
+ipa_srv_acct_send(TALLOC_CTX *mem_ctx,
+                  struct tevent_context *ev,
+                  struct ipa_id_ctx *ipa_ctx,
+                  struct sysdb_attrs *override_attrs,
+                  struct dp_id_data *ar)
 {
     errno_t ret;
     struct tevent_req *req;
-    struct ipa_srv_ad_acct_state *state;
+    struct ipa_srv_acct_state *state;
 
-    req = tevent_req_create(mem_ctx, &state, struct ipa_srv_ad_acct_state);
+    req = tevent_req_create(mem_ctx, &state, struct ipa_srv_acct_state);
     if (req == NULL) {
         return NULL;
     }
@@ -1714,7 +1714,7 @@ ipa_srv_ad_acct_send(TALLOC_CTX *mem_ctx,
         goto fail;
     }
 
-    ret = ipa_srv_ad_acct_lookup_step(req);
+    ret = ipa_srv_acct_lookup_step(req);
     if (ret != EOK) {
         goto fail;
     }
@@ -1727,11 +1727,11 @@ fail:
     return req;
 }
 
-static int ipa_srv_ad_acct_lookup_step(struct tevent_req *req)
+static int ipa_srv_acct_lookup_step(struct tevent_req *req)
 {
     struct tevent_req *subreq;
-    struct ipa_srv_ad_acct_state *state = tevent_req_data(req,
-                                            struct ipa_srv_ad_acct_state);
+    struct ipa_srv_acct_state *state = tevent_req_data(req,
+                                            struct ipa_srv_acct_state);
 
     DEBUG(SSSDBG_TRACE_FUNC, "Looking up AD account\n");
     subreq = ipa_get_ad_acct_send(state, state->ev, state->ipa_ctx,
@@ -1740,21 +1740,21 @@ static int ipa_srv_ad_acct_lookup_step(struct tevent_req *req)
     if (subreq == NULL) {
         return ENOMEM;
     }
-    tevent_req_set_callback(subreq, ipa_srv_ad_acct_lookup_done, req);
+    tevent_req_set_callback(subreq, ipa_srv_acct_lookup_done, req);
 
     return EOK;
 }
 
-static void ipa_srv_ad_acct_lookup_done(struct tevent_req *subreq)
+static void ipa_srv_acct_lookup_done(struct tevent_req *subreq)
 {
     errno_t ret;
     int dp_error = DP_ERR_FATAL;
     struct tevent_req *req = tevent_req_callback_data(subreq,
                                                 struct tevent_req);
-    struct ipa_srv_ad_acct_state *state = tevent_req_data(req,
-                                            struct ipa_srv_ad_acct_state);
+    struct ipa_srv_acct_state *state = tevent_req_data(req,
+                                            struct ipa_srv_acct_state);
 
-    ret = ipa_get_ad_acct_recv(subreq, &dp_error);
+    ret = ipa_get_acct_recv(subreq, &dp_error);
     talloc_free(subreq);
     if (ret == ERR_SUBDOM_INACTIVE && state->retry == true) {
 
@@ -1769,7 +1769,7 @@ static void ipa_srv_ad_acct_lookup_done(struct tevent_req *subreq)
         if (subreq == NULL) {
             goto fail;
         }
-        tevent_req_set_callback(subreq, ipa_srv_ad_acct_retried, req);
+        tevent_req_set_callback(subreq, ipa_srv_acct_retried, req);
         return;
     } else if (ret != EOK) {
         be_mark_dom_offline(state->obj_dom, state->be_ctx);
@@ -1788,14 +1788,14 @@ fail:
     tevent_req_error(req, ret);
 }
 
-static void ipa_srv_ad_acct_retried(struct tevent_req *subreq)
+static void ipa_srv_acct_retried(struct tevent_req *subreq)
 {
     errno_t ret;
     struct ad_id_ctx *ad_id_ctx;
     struct tevent_req *req = tevent_req_callback_data(subreq,
                                                 struct tevent_req);
-    struct ipa_srv_ad_acct_state *state = tevent_req_data(req,
-                                            struct ipa_srv_ad_acct_state);
+    struct ipa_srv_acct_state *state = tevent_req_data(req,
+                                            struct ipa_srv_acct_state);
 
     ret = ipa_server_trusted_dom_setup_recv(subreq);
     talloc_free(subreq);
@@ -1818,7 +1818,7 @@ static void ipa_srv_ad_acct_retried(struct tevent_req *subreq)
 
     ad_failover_reset(state->be_ctx, ad_id_ctx->ad_options->service);
 
-    ret = ipa_srv_ad_acct_lookup_step(req);
+    ret = ipa_srv_acct_lookup_step(req);
     if (ret != EOK) {
         DEBUG(SSSDBG_OP_FAILURE,
               "Failed to look up AD acct [%d]: %s\n", ret, sss_strerror(ret));
@@ -1829,10 +1829,10 @@ static void ipa_srv_ad_acct_retried(struct tevent_req *subreq)
 }
 
 static errno_t
-ipa_srv_ad_acct_recv(struct tevent_req *req, int *dp_error_out)
+ipa_srv_acct_recv(struct tevent_req *req, int *dp_error_out)
 {
-    struct ipa_srv_ad_acct_state *state = tevent_req_data(req,
-                                                struct ipa_srv_ad_acct_state);
+    struct ipa_srv_acct_state *state = tevent_req_data(req,
+                                                struct ipa_srv_acct_state);
 
     if (dp_error_out) {
         *dp_error_out = state->dp_error;
