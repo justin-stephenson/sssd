@@ -108,6 +108,32 @@ errno_t ipa_server_get_trust_direction(struct sysdb_attrs *sd,
     return EOK;
 }
 
+errno_t ipa_server_get_trust_type(struct sysdb_attrs *sd,
+                                  struct ldb_context *ldb_ctx,
+                                  uint32_t *_type)
+{
+    uint32_t ipa_trust_type = 0;
+    uint32_t type;
+    int ret;
+
+    ret = sysdb_attrs_get_uint32_t(sd, IPA_TRUST_TYPE,
+                                   &ipa_trust_type);
+    DEBUG(SSSDBG_TRACE_INTERNAL,
+          "Raw %s value: %d\n", IPA_TRUST_TYPE, ipa_trust_type);
+    if (ret == ENOENT) {
+        type = 0;
+    } else if (ret == EOK) {
+        /* Just store the value in SYSDB, we will check it while we're
+         * trying to use the trust */
+        type = ipa_trust_type;
+    } else {
+        return ret;
+    }
+
+    *_type = type;
+    return EOK;
+}
+
 const char *ipa_trust_dir2str(uint32_t direction)
 {
     if ((direction & LSA_TRUST_DIRECTION_OUTBOUND)
@@ -118,6 +144,19 @@ const char *ipa_trust_dir2str(uint32_t direction)
     } else if (direction & LSA_TRUST_DIRECTION_INBOUND) {
         return "one-way inbound: local domain trusts the remote domain";
     } else if (direction == 0) {
+        return "not set";
+    }
+
+    return "unknown";
+}
+
+const char *ipa_trust_type2str(uint32_t type)
+{
+    if (type == 2) {
+        return "Active Directory Trust";
+    } else if (type == 1) {
+        return "IPA Trust";
+    } else if (type == 0) {
         return "not set";
     }
 
