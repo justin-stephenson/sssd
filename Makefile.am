@@ -99,8 +99,8 @@ ifp_systemdservice = SystemdService=sssd-ifp.service
 # or some snippet under /etc/sssd/sssd.conf.d/) to be present.
 condconfigexists = ConditionPathExists=\|/etc/sssd/sssd.conf\nConditionDirectoryNotEmpty=\|/etc/sssd/conf.d/
 
-# Bounding set needs to list capabilities required by ldap/krb5/selinux_childs, otherwise they can't gain it.
-capabilities = CapabilityBoundingSet= CAP_CHOWN CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID
+# Bounding set needs to list capabilities required by ldap/krb5/selinux_childs and sssd_pam, otherwise they can't gain it.
+capabilities = CapabilityBoundingSet= CAP_CHOWN CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID CAP_DAC_READ_SEARCH
 
 if BUILD_CONF_SERVICE_USER_SUPPORT
 # If non-root service user is supported, monitor might need SET-ID to switch user (deprecated 'sssd.conf::user' option)
@@ -3571,10 +3571,13 @@ test_ipa_subdom_server_SOURCES = \
     src/tests/cmocka/common_mock_sdap.c \
     src/tests/cmocka/common_mock_be.c \
     src/tests/cmocka/common_mock_krb5.c \
+    src/tests/cmocka/data_provider/mock_dp.c \
     src/tests/cmocka/test_ipa_subdomains_server.c \
     src/providers/ipa/ipa_subdomains_server.c \
     src/providers/ipa/ipa_subdomains_utils.c \
+    src/providers/ipa/ipa_common.c \
     src/providers/ipa/ipa_opts.c \
+    src/providers/ipa/ipa_srv.c \
     src/providers/ldap/ldap_common.c \
     $(NULL)
 test_ipa_subdom_server_CFLAGS = \
@@ -5587,6 +5590,11 @@ if SSSD_USER
 	-chgrp $(SSSD_USER) $(DESTDIR)$(sssdlibexecdir)/krb5_child
 	chmod 750 $(DESTDIR)$(sssdlibexecdir)/krb5_child
 	-$(SETCAP) $(CHILD_CAPABILITIES) $(DESTDIR)$(sssdlibexecdir)/krb5_child
+	-chgrp $(SSSD_USER) $(DESTDIR)$(sssdlibexecdir)/proxy_child
+	chmod 750 $(DESTDIR)$(sssdlibexecdir)/proxy_child
+	-chgrp $(SSSD_USER) $(DESTDIR)$(sssdlibexecdir)/sssd_pam
+	chmod 750 $(DESTDIR)$(sssdlibexecdir)/sssd_pam
+	-$(SETCAP) cap_dac_read_search=p $(DESTDIR)$(sssdlibexecdir)/sssd_pam
 if BUILD_SELINUX
 	-chgrp $(SSSD_USER) $(DESTDIR)$(sssdlibexecdir)/selinux_child
 	chmod 750 $(DESTDIR)$(sssdlibexecdir)/selinux_child
@@ -5729,13 +5737,32 @@ RPMBUILD ?= $(PWD)/rpmbuild
 dist_noinst_DATA += \
     m4 \
     contrib/sssd.spec.in \
-    contrib/sssd.sysusers \
-    contrib/90-sssd-token-access.rules \
-    contrib/sssd-tmpfiles.conf \
     BUILD.txt \
     COPYING \
     src/tests/ \
     $(NULL)
+
+
+if BUILD_TMPFILES
+        tmpfiles_DATA = contrib/sssd-tmpfiles.conf
+        CLEANFILES += contrib/sssd-tmpfiles.conf
+else
+	dist_noinst_DATA += contrib/sssd-tmpfiles.conf
+endif
+
+if BUILD_UDEV_RULES
+        udevrules_DATA = contrib/90-sssd-token-access.rules
+        CLEANFILES += contrib/90-sssd-token-access.rules
+else
+	dist_noinst_DATA += contrib/90-sssd-token-access.rules
+endif
+
+if BUILD_SYSTEMD_SYSUSERS
+        systemd_sysusers_DATA = contrib/sssd.sysusers
+        CLEANFILES += contrib/sssd.sysusers
+else
+        dist_noinst_DATA += contrib/sssd.sysusers
+endif
 
 rpmroot:
 	$(MKDIR_P) $(RPMBUILD)/BUILD
