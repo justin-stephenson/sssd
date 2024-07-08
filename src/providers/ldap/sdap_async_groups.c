@@ -1885,6 +1885,8 @@ static errno_t sdap_get_groups_next_base(struct tevent_req *req)
     state = tevent_req_data(req, struct sdap_get_groups_state);
 
     talloc_zfree(state->filter);
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-base_filter: [%s]\n", state->base_filter);
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-search_bases->filter: [%s]\n", state->search_bases[state->base_iter]->filter);
     state->filter = sdap_combine_filters(state, state->base_filter,
                         state->search_bases[state->base_iter]->filter);
     if (!state->filter) {
@@ -1910,6 +1912,7 @@ static errno_t sdap_get_groups_next_base(struct tevent_req *req)
         break;
     }
 
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-filter: [%s]\n", state->filter);
     subreq = sdap_get_and_parse_generic_send(
             state, state->ev, state->opts,
             state->ldap_sh != NULL ? state->ldap_sh : state->sh,

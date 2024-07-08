@@ -533,6 +533,11 @@ static errno_t ipa_subdom_store(struct sss_domain_info *parent,
         }
     }
 
+    /* FIXME: Testing only */
+    if (strcasecmp(name, "ipa2.test") == 0) {
+        mpg_mode = MPG_ENABLED;
+    }
+
     DEBUG(SSSDBG_TRACE_FUNC, "Domain mpg mode for %s: %s\n",
           name, str_domain_mpg_mode(mpg_mode));
 

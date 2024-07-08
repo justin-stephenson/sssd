@@ -2024,7 +2024,7 @@ char *sdap_make_oc_list(TALLOC_CTX *mem_ctx, struct sdap_attr_map *map)
                                map[SDAP_OC_GROUP].name);
     } else {
         return talloc_asprintf(mem_ctx,
-                               "|(objectClass=%s)(objectClass=%s)",
+                               "&(|(objectClass=%s)(objectClass=%s))(!(objectClass=mepManagedEntry))",
                                map[SDAP_OC_GROUP].name,
                                map[SDAP_OC_GROUP_ALT].name);
     }
