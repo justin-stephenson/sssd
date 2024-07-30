@@ -1332,6 +1332,11 @@ static errno_t ipa_server_create_trusts_ctx(struct tevent_req *req)
 
     trust_type = state->domiter->forest_root->trust_type;
 
+    /* Previously stored AD trusted domains dont contain trust type attr */
+    if (trust_type != IPA_TRUST_AD && trust_type != IPA_TRUST_IPA) {
+        trust_type = IPA_TRUST_AD;
+    }
+
     if (trust_type == IPA_TRUST_AD) {
         ret = ipa_ad_ctx_new(state->be_ctx, state->id_ctx, state->domiter, &ad_id_ctx);
         if (ret != EOK) {
@@ -1346,9 +1351,6 @@ static errno_t ipa_server_create_trusts_ctx(struct tevent_req *req)
                   "Cannot create ipa_id_ctx for subdomain %s\n", state->domiter->name);
             return ret;
         }
-    } else {
-        DEBUG(SSSDBG_OP_FAILURE, "Unknown trust type\n");
-        return ENOTSUP;
     }
 
     trust_ctx = talloc(state->id_ctx->server_mode, struct ipa_subdom_server_ctx);
