@@ -308,7 +308,7 @@ static int parse_name_test_setup_re(void **state, const char *regexp)
      */
     test_ctx->subdom = new_subdomain(dom, dom, SUBDOMNAME, NULL, SUBFLATNAME,
                                      SUBDOMNAME, NULL, MPG_DISABLED, false,
-                                     NULL, NULL, 0, NULL, true);
+                                     NULL, NULL, 0, 0, NULL, true);
     assert_non_null(test_ctx->subdom);
 
     check_leaks_push(test_ctx);
