@@ -1454,6 +1454,9 @@ static void ipa_s2n_get_list_next(struct tevent_req *subreq)
     struct berval *retdata = NULL;
     const char *sid_str;
     struct dp_id_data *ar;
+    struct req_input *req_inp;
+
+    req_inp = &state->req_input;
 
     ret = ipa_s2n_exop_recv(subreq, state, &retoid, &retdata);
     talloc_zfree(subreq);
@@ -1490,8 +1493,32 @@ static void ipa_s2n_get_list_next(struct tevent_req *subreq)
     if (ret != EOK) {
         DEBUG(SSSDBG_CRIT_FAILURE,
               "Object [%s] has no SID, please check the "
-              "ipaNTSecurityIdentifier attribute on the server-side",
+              "ipaNTSecurityIdentifier attribute on the server-side\n",
               state->attrs->a.name);
+        /* In IPA IPA trust case, the IPA user private group will not contain a
+         * SID, so ignore processing it and continue */
+        if (req_inp->type == REQ_INP_NAME &&
+            strcasecmp(state->attrs->domain_name, state->dom->name) == 0 &&
+            /* user private group name == username */
+            strncasecmp(req_inp->inp.name, state->attrs->a.name, strlen(req_inp->inp.name)) == 0) {
+            ret = ipa_s2n_get_list_step(req);
+            if (ret != EOK) {
+                DEBUG(SSSDBG_OP_FAILURE, "ipa_s2n_get_list_step failed.\n");
+                goto fail;
+            }
+
+            state->list_idx++;
+            if (state->list[state->list_idx] == NULL) {
+                tevent_req_done(req);
+            } else {
+                ret = ipa_s2n_get_list_step(req);
+                if (ret != EOK) {
+                    DEBUG(SSSDBG_OP_FAILURE, "ipa_s2n_get_list_step failed.\n");
+                    goto fail;
+                }
+            }
+        }
+
         goto fail;
     }
 
