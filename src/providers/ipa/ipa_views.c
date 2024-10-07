@@ -31,6 +31,12 @@
 
 #define MAX_USER_AND_GROUP_REPLIES 2
 
+enum ipa_override_search_type {
+    IPA_OVERRIDE,
+    IPA_OVERRIDE_DOMAIN_TEMPLATE,
+    IPA_OVERRIDE_GLOBAL_TEMPLATE,
+};
+
 static errno_t get_user_or_group(TALLOC_CTX *mem_ctx,
                                  struct ipa_options *ipa_opts,
                                  struct sysdb_attrs *attrs,
@@ -139,6 +145,7 @@ done:
 static errno_t dp_id_data_to_override_filter(TALLOC_CTX *mem_ctx,
                                               struct ipa_options *ipa_opts,
                                               struct dp_id_data *ar,
+                                              enum ipa_override_search_type search_type,
                                               char **override_filter)
 {
     char *filter;
@@ -148,6 +155,9 @@ static errno_t dp_id_data_to_override_filter(TALLOC_CTX *mem_ctx,
     int ret;
     char *shortname;
     char *sanitized_name;
+    char *domain_part;
+    char *rid_part;
+    int cut_idx;
 
     switch (ar->filter_type) {
     case BE_FILTER_NAME:
@@ -243,10 +253,27 @@ static errno_t dp_id_data_to_override_filter(TALLOC_CTX *mem_ctx,
 
     case BE_FILTER_SECID:
         if ((ar->entry_type & BE_REQ_TYPE_MASK) == BE_REQ_BY_SECID) {
-            filter = talloc_asprintf(mem_ctx, "(&(objectClass=%s)(%s=:SID:%s))",
-                       ipa_opts->override_map[IPA_OC_OVERRIDE].name,
-                       ipa_opts->override_map[IPA_AT_OVERRIDE_ANCHOR_UUID].name,
-                       ar->filter_value);
+            if (search_type == IPA_OVERRIDE_DOMAIN_TEMPLATE) {
+                
+                DEBUG(SSSDBG_TRACE_FUNC, "JS-filter value: [%s]\n", ar->filter_value);
+                rid_part = strrchr(ar->filter_value, '-');
+
+                cut_idx = strlen(ar->filter_value) - strlen(rid_part);
+                domain_part = talloc_strdup(mem_ctx, ar->filter_value);
+                domain_part[cut_idx] = '\0';
+                //ar->filter_value[cut_idx] = '\0';
+                filter = talloc_asprintf(mem_ctx, "%s", domain_part);
+                DEBUG(SSSDBG_TRACE_FUNC, "JS-filter [%s]\n", filter);
+                filter = talloc_asprintf(mem_ctx, "(&(objectClass=%s)(%s=:SID:%s))",
+                           ipa_opts->override_map[IPA_OC_OVERRIDE].name,
+                           ipa_opts->override_map[IPA_AT_OVERRIDE_ANCHOR_UUID].name,
+                           ar->filter_value);
+            } else {
+                filter = talloc_asprintf(mem_ctx, "(&(objectClass=%s)(%s=:SID:%s))",
+                           ipa_opts->override_map[IPA_OC_OVERRIDE].name,
+                           ipa_opts->override_map[IPA_AT_OVERRIDE_ANCHOR_UUID].name,
+                           ar->filter_value);
+            }
         } else {
             DEBUG(SSSDBG_CRIT_FAILURE,
                   "Unexpected entry type [%d] for SID filter.\n",
@@ -383,8 +410,11 @@ struct ipa_get_ad_override_state {
     struct sdap_id_ctx *sdap_id_ctx;
     struct ipa_options *ipa_options;
     const char *ipa_realm;
+    const char *view_name;
     const char *ipa_view_name;
     struct dp_id_data *ar;
+    enum ipa_override_search_type search_type;
+    int num_iter;
 
     struct sdap_id_op *sdap_op;
     int dp_error;
@@ -392,6 +422,7 @@ struct ipa_get_ad_override_state {
     char *filter;
 };
 
+static errno_t ipa_get_ad_override_next(struct tevent_req *req);
 static void ipa_get_ad_override_connect_done(struct tevent_req *subreq);
 static errno_t ipa_get_ad_override_qualify_name(
                                 struct ipa_get_ad_override_state *state);
@@ -407,7 +438,6 @@ struct tevent_req *ipa_get_ad_override_send(TALLOC_CTX *mem_ctx,
 {
     int ret;
     struct tevent_req *req;
-    struct tevent_req *subreq;
     struct ipa_get_ad_override_state *state;
 
     req = tevent_req_create(mem_ctx, &state, struct ipa_get_ad_override_state);
@@ -420,53 +450,83 @@ struct tevent_req *ipa_get_ad_override_send(TALLOC_CTX *mem_ctx,
     state->sdap_id_ctx = sdap_id_ctx;
     state->ipa_options = ipa_options;
     state->ipa_realm = ipa_realm;
+    state->view_name = view_name;
     state->ar = ar;
     state->dp_error = -1;
     state->override_attrs = NULL;
     state->filter = NULL;
+    state->num_iter = 0;
+    state->search_type = IPA_OVERRIDE;
 
-    if (view_name == NULL) {
-        DEBUG(SSSDBG_TRACE_ALL, "View not defined, nothing to do.\n");
-        ret = EOK;
-        goto done;
+    ret = ipa_get_ad_override_next(req);
+    if (ret == EAGAIN) {
+        return req;
     }
 
-    if (is_default_view(view_name)) {
+    if (ret == EOK) {
+        tevent_req_done(req);
+    } else {
+        tevent_req_error(req, ret);
+    }
+
+    tevent_req_post(req, ev);
+    return req;
+}
+
+static errno_t ipa_get_ad_override_next(struct tevent_req *req)
+{
+    int ret;
+    struct ipa_get_ad_override_state *state;
+    struct tevent_req *subreq;
+
+    state = tevent_req_data(req, struct ipa_get_ad_override_state);
+
+    switch (state->search_type) {
+        case IPA_OVERRIDE:
+            DEBUG(SSSDBG_TRACE_FUNC, "JS-IPA_OVERRIDE\n");
+            break;
+        case IPA_OVERRIDE_DOMAIN_TEMPLATE:
+            DEBUG(SSSDBG_TRACE_FUNC, "JS-IPA_OVERRIDE_DOMAIN_TEMPLATE\n");
+            break;
+        case IPA_OVERRIDE_GLOBAL_TEMPLATE:
+            DEBUG(SSSDBG_TRACE_FUNC, "JS-IPA_OVERRIDE_GLOBAL_TEMPLATE\n");
+            break;
+        default:
+            DEBUG(SSSDBG_TRACE_FUNC, "JS-unknown type!\n");
+            break;
+    }
+
+    if (state->view_name == NULL) {
+        DEBUG(SSSDBG_TRACE_ALL, "View not defined, nothing to do.\n");
+        return EOK;
+    }
+
+    if (is_default_view(state->view_name)) {
         state->ipa_view_name = IPA_DEFAULT_VIEW_NAME;
     } else {
-        state->ipa_view_name = view_name;
+        state->ipa_view_name = state->view_name;
     }
 
     state->sdap_op = sdap_id_op_create(state,
                                        state->sdap_id_ctx->conn->conn_cache);
     if (state->sdap_op == NULL) {
         DEBUG(SSSDBG_OP_FAILURE, "sdap_id_op_create failed\n");
-        ret = ENOMEM;
-        goto done;
+        return ENOMEM;
     }
 
     subreq = sdap_id_op_connect_send(state->sdap_op, state, &ret);
     if (subreq == NULL) {
         DEBUG(SSSDBG_OP_FAILURE, "sdap_id_op_connect_send failed: %d(%s).\n",
                                   ret, strerror(ret));
-        goto done;
+        return ENOMEM;
     }
 
     tevent_req_set_callback(subreq, ipa_get_ad_override_connect_done, req);
 
-    return req;
+    state->num_iter++;
+    state->search_type++;
+    return EAGAIN;
 
-done:
-    if (ret != EOK) {
-        state->dp_error = DP_ERR_FATAL;
-        tevent_req_error(req, ret);
-    } else {
-        state->dp_error = DP_ERR_OK;
-        tevent_req_done(req);
-    }
-    tevent_req_post(req, state->ev);
-
-    return req;
 }
 
 static void ipa_get_ad_override_connect_done(struct tevent_req *subreq)
@@ -510,7 +570,7 @@ static void ipa_get_ad_override_connect_done(struct tevent_req *subreq)
     }
 
     ret = dp_id_data_to_override_filter(state, state->ipa_options, state->ar,
-                                         &state->filter);
+                                        state->search_type, &state->filter);
     if (ret != EOK) {
         DEBUG(SSSDBG_OP_FAILURE, "dp_id_data_to_override_filter failed.\n");
         goto fail;
@@ -558,15 +618,20 @@ static void ipa_get_ad_override_done(struct tevent_req *subreq)
     talloc_zfree(subreq);
     if (ret != EOK) {
         DEBUG(SSSDBG_OP_FAILURE, "ipa_get_ad_override request failed.\n");
-        goto fail;
+        goto done;
     }
 
     if (reply_count == 0) {
         DEBUG(SSSDBG_TRACE_ALL, "No override found with filter [%s].\n",
                                 state->filter);
-        state->dp_error = DP_ERR_OK;
-        tevent_req_done(req);
-        return;
+        if (state->num_iter == 2) {
+            DEBUG(SSSDBG_TRACE_FUNC, "JS-goto done\n");
+            goto done;
+        } else {
+            /* Continue to next override search */
+            ret = ipa_get_ad_override_next(req);
+            goto done;
+        }
     } else if (reply_count == MAX_USER_AND_GROUP_REPLIES &&
                (state->ar->entry_type & BE_REQ_TYPE_MASK) == BE_REQ_USER_AND_GROUP) {
         DEBUG(SSSDBG_TRACE_ALL,
@@ -575,14 +640,14 @@ static void ipa_get_ad_override_done(struct tevent_req *subreq)
         ret = check_and_filter_user_and_group(state->ipa_options, reply,
                                               &reply_count);
         if (ret != EOK) {
-            goto fail;
+            goto done;
         }
     } else if (reply_count > 1) {
         DEBUG(SSSDBG_CRIT_FAILURE,
               "Found [%zu] overrides with filter [%s], expected only 1.\n",
               reply_count, state->filter);
         ret = EINVAL;
-        goto fail;
+        goto done;
     }
 
     DEBUG(SSSDBG_TRACE_ALL, "Found override for object with filter [%s].\n",
@@ -592,16 +657,19 @@ static void ipa_get_ad_override_done(struct tevent_req *subreq)
     ret = ipa_get_ad_override_qualify_name(state);
     if (ret != EOK) {
         DEBUG(SSSDBG_CRIT_FAILURE, "Cannot qualify object name\n");
-        goto fail;
+        goto done;
     }
 
-    state->dp_error = DP_ERR_OK;
-    tevent_req_done(req);
-    return;
-
-fail:
-    state->dp_error = DP_ERR_FATAL;
-    tevent_req_error(req, ret);
+done:
+    if (ret == EOK) {
+        state->dp_error = DP_ERR_OK;
+        tevent_req_done(req);
+    } else if (ret == EAGAIN) {
+        /* Still processing */
+    } else {
+        state->dp_error = DP_ERR_FATAL;
+        tevent_req_error(req, ret);
+    }
     return;
 }
 
