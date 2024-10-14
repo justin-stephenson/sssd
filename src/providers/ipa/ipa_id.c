@@ -373,6 +373,9 @@ static void ipa_initgr_get_overrides_override_done(struct tevent_req *subreq)
     if (is_default_view(state->ipa_ctx->view_name)) {
         ret = sysdb_apply_default_override(state->user_dom, override_attrs,
                                        state->groups[state->group_idx]->dn);
+
+        ret = sysdb_apply_default_override_template(state, state->user_dom,
+                                                    state->groups[state->group_idx]->dn);
     } else {
         ret = sysdb_store_override(state->user_dom,
                                    state->ipa_ctx->view_name,

@@ -25,6 +25,7 @@
 #include "db/sysdb_domain_resolution_order.h"
 
 #define SYSDB_VIEWS_BASE "cn=views,cn=sysdb"
+#define SYSDB_DOMAIN_TEMPLATE_OVERRIDE_FILTER "(templateType=domain)"
 
 /* In general is should not be possible that there is a view container without
  * a view name set. But to be on the safe side we return both information
@@ -819,6 +820,143 @@ done:
     return ret;
 }
 
+errno_t sysdb_search_override_domain_template(TALLOC_CTX *mem_ctx,
+                                              struct sss_domain_info *domain,
+                                              struct ldb_result **_result)
+{
+    TALLOC_CTX *tmp_ctx;
+    struct ldb_dn *base_dn;
+    struct ldb_result *res;
+    int ret;
+
+    tmp_ctx = talloc_new(NULL);
+    if (!tmp_ctx) {
+        return ENOMEM;
+    }
+
+    base_dn = ldb_dn_new_fmt(tmp_ctx, domain->sysdb->ldb,
+                             SYSDB_TMPL_VIEW_BASE);
+    if (base_dn == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "ldb_dn_new_fmt failed.\n");
+        ret = ENOMEM;
+        goto done;
+    }
+
+    ret = ldb_search(domain->sysdb->ldb, tmp_ctx, &res, base_dn,
+                     LDB_SCOPE_SUBTREE, NULL, SYSDB_DOMAIN_TEMPLATE_OVERRIDE_FILTER);
+    if (ret != LDB_SUCCESS) {
+        ret = sysdb_error_to_errno(ret);
+        goto done;
+    }
+
+    if (res->count == 0) {
+        DEBUG(SSSDBG_TRACE_FUNC, "No domain override template found.\n");
+        ret = ENOENT;
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC,
+          "Found [%u] domain override template(s)\n", res->count);
+ 
+
+    /*
+    if (orig_obj != NULL) {
+        orig_obj_dn = ldb_msg_find_attr_as_string(override_res->msgs[0],
+                                                  SYSDB_OVERRIDE_OBJECT_DN,
+                                                  NULL);
+        if (orig_obj_dn == NULL) {
+            DEBUG(SSSDBG_CRIT_FAILURE,
+                  "Missing link to original object in override [%s].\n",
+                  ldb_dn_get_linearized(override_res->msgs[0]->dn));
+            ret = EINVAL;
+            goto done;
+        }
+
+        base_dn = ldb_dn_new(tmp_ctx, domain->sysdb->ldb, orig_obj_dn);
+        if (base_dn == NULL) {
+            DEBUG(SSSDBG_OP_FAILURE, "ldb_dn_new failed.\n");
+            ret = ENOMEM;
+            goto done;
+        }
+
+        ret = ldb_search(domain->sysdb->ldb, tmp_ctx, &orig_res, base_dn,
+                         LDB_SCOPE_BASE, attrs, NULL);
+        if (ret != LDB_SUCCESS) {
+            ret = sysdb_error_to_errno(ret);
+            goto done;
+        }
+
+        *orig_obj = talloc_steal(mem_ctx, orig_res);
+    }
+
+    *override_obj = talloc_steal(mem_ctx, override_res);
+    */
+
+    *_result = talloc_steal(mem_ctx, res);
+
+    ret = EOK;
+
+done:
+    talloc_zfree(tmp_ctx);
+    return ret;
+}
+
+errno_t sysdb_apply_default_override_template(TALLOC_CTX *mem_ctx,
+                                              struct sss_domain_info *domain,
+                                              struct ldb_dn *obj_dn)
+{
+    int ret;
+    const char *anchor = NULL;
+    const char *homedir = NULL;
+    const char *shell = NULL;
+    struct ldb_result *res;
+
+    /* Read domain templates */
+    ret = sysdb_search_override_domain_template(mem_ctx, domain, &res);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "sysdb_search_override_domain_template failed.\n");
+        return ret;
+    }
+
+    /* Check if our domain matches any of the domain templates */
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-checking against domain [%s][%s]\n", domain->name, domain->domain_id);
+    for (int c = 0; c < res->count; c++) {
+        anchor = ldb_msg_find_attr_as_string(res->msgs[c],
+                                             SYSDB_OVERRIDE_ANCHOR_UUID,
+                                             NULL);
+        if (anchor != NULL) {
+            DEBUG(SSSDBG_TRACE_FUNC, "JS-anchor: [%s]\n", anchor);
+        }
+
+        /* Found a domain match */
+        if (strstr(anchor, domain->domain_id)) {
+            homedir = ldb_msg_find_attr_as_string(res->msgs[c],
+                                                 SYSDB_HOMEDIR,
+                                                 NULL);
+            shell = ldb_msg_find_attr_as_string(res->msgs[c],
+                                                 SYSDB_SHELL,
+                                                 NULL);
+
+            if (homedir != NULL) {
+                DEBUG(SSSDBG_TRACE_FUNC, "JS-Overriding [%s] from anchor [%s]\n", SYSDB_HOMEDIR, anchor);
+            }
+
+            if (shell != NULL) {
+                DEBUG(SSSDBG_TRACE_FUNC, "JS-Overriding [%s] from anchor [%s]\n", SYSDB_SHELL, anchor);
+            }
+            /* If yes, override obj_dn values (see below */
+
+        }
+    }
+
+
+
+    /* Read global templates */
+    /* If yes, override obj_dn values (see below */
+    return EOK;
+
+}
+
 errno_t sysdb_apply_default_override(struct sss_domain_info *domain,
                                      struct sysdb_attrs *override_attrs,
                                      struct ldb_dn *obj_dn)
@@ -1095,6 +1233,7 @@ done:
     talloc_zfree(tmp_ctx);
     return ret;
 }
+
 
 static errno_t sysdb_search_override_by_name(TALLOC_CTX *mem_ctx,
                                              struct sss_domain_info *domain,
@@ -1842,4 +1981,186 @@ const char *sss_view_ldb_msg_find_attr_as_string(struct sss_domain_info *dom,
 {
     return sss_view_ldb_msg_find_attr_as_string_ex(dom, msg, attr_name,
                                                    default_value, NULL);
+}
+
+static errno_t sysdb_create_override_template(struct sysdb_ctx *sysdb,
+                                              const char *template_dn,
+                                              const char *anchor,
+                                              const char *homedir,
+                                              const char *shell)
+{
+    struct ldb_message *msg = NULL;
+    errno_t ret;
+
+    msg = ldb_msg_new(sysdb);
+    if (msg == NULL) {
+        ret = ENOMEM;
+        goto done;
+    }
+    msg->dn = ldb_dn_new(msg, sysdb->ldb, template_dn);
+    if (msg->dn == NULL) {
+        ret = ENOMEM;
+        goto done;
+    }
+
+    ret = ldb_msg_add_string(msg, SYSDB_OBJECTCLASS,
+                             SYSDB_OVERRIDE_ANCHOR);
+
+    ret = ldb_msg_add_string(msg, SYSDB_OBJECTCLASS,
+                             SYSDB_OVERRIDE_USER_CLASS);
+
+    /* FIXME magic values */
+    /* global templates always have anchor :SID:S-1-5-11 */
+    if (strstr(anchor, "S-1-5-11") != NULL) {
+        ret = ldb_msg_add_string(msg, "templateType", "global");
+        if (ret != LDB_SUCCESS) {
+            ret = sysdb_error_to_errno(ret);
+            goto done;
+        }
+    /* domain template examples below in format :SID:$domainpart-545
+     *     :SID:S-1-5-21-3044487217-4285925784-991641718-545
+     *     :SID:S-1-5-21-644878228-3836315275-1841415914-545
+     */
+    } else if (strstr(anchor, "-545") != NULL) {
+        ret = ldb_msg_add_string(msg, "templateType", "domain");
+        if (ret != LDB_SUCCESS) {
+            ret = sysdb_error_to_errno(ret);
+            goto done;
+        }
+    }
+
+    if (homedir != NULL) {
+        ret = ldb_msg_add_string(msg, SYSDB_HOMEDIR, homedir);
+        if (ret != LDB_SUCCESS) {
+            ret = sysdb_error_to_errno(ret);
+            goto done;
+        }
+    }
+
+    if (shell != NULL) {
+        ret = ldb_msg_add_string(msg, SYSDB_SHELL, shell);
+        if (ret != LDB_SUCCESS) {
+            ret = sysdb_error_to_errno(ret);
+            goto done;
+        }
+    }
+
+    ret = ldb_msg_add_string(msg, SYSDB_OVERRIDE_ANCHOR_UUID, anchor);
+    if (ret != LDB_SUCCESS) {
+        ret = sysdb_error_to_errno(ret);
+        goto done;
+    }
+
+    /* do a synchronous add */
+    ret = ldb_add(sysdb->ldb, msg);
+    if (ret != LDB_SUCCESS) {
+        DEBUG(SSSDBG_FATAL_FAILURE,
+              "Failed to add domain template container (%d, [%s])!\n",
+               ret, ldb_errstring(sysdb->ldb));
+        ret = EIO;
+        goto done;
+    }
+
+    ret = EOK;
+
+done:
+    talloc_free(msg);
+
+    return ret;
+}
+
+errno_t sysdb_update_override_template(struct sysdb_ctx *sysdb,
+                                       struct sysdb_attrs *attrs)
+{
+    struct ldb_dn *container_dn = NULL;
+    TALLOC_CTX *tmp_ctx = NULL;
+    bool in_transaction = false;
+    int ret;
+    const char *anchor;
+    const char *homedir = NULL;
+    const char *shell = NULL;
+    const char *anchor_chopped;
+    const char *template_dn;
+
+    if (attrs == NULL) {
+        return EINVAL;
+    }
+
+    tmp_ctx = talloc_new(NULL);
+    if (tmp_ctx == NULL) {
+        return ENOMEM;
+    }
+
+    ret = sysdb_attrs_get_string(attrs, "ipaAnchorUUID", &anchor);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "sysdb_attrs_get_string failed: [%d](%s)\n",
+              ret, sss_strerror(ret));
+        goto done;
+    }
+
+    /* ether HOMEDIR and/or SHELL should be present, we don't need to check if ret != EOK */
+    sysdb_attrs_get_string(attrs, SYSDB_HOMEDIR, &homedir);
+    sysdb_attrs_get_string(attrs, SYSDB_SHELL, &shell);
+
+    template_dn = talloc_asprintf(tmp_ctx, "ipaanchoruuid=%s,%s",
+                                  anchor,
+                                  SYSDB_TMPL_VIEW_BASE);
+    if (template_dn == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_asprintf failed.\n");
+        ret = ENOMEM;
+        goto done;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC, "Preparing to add [%s] to sysdb\n",
+                             template_dn);
+
+    /* anchor begins with a : character, ldb treats strings beginning
+     * with : as base64 so we need to remove it */
+    anchor_chopped = anchor + 1;
+
+    container_dn = ldb_dn_new(sysdb, sysdb->ldb, template_dn);
+    if (container_dn == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "ldb_dn_new failed.\n");
+        return ENOMEM;
+    }
+
+    ret = sysdb_transaction_start(sysdb);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "sysdb_transaction_start failed.\n");
+        goto done;
+    }
+    in_transaction = true;
+
+    ret = sysdb_delete_recursive(sysdb, container_dn, true);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "sysdb_delete_recursive failed.\n");
+        goto done;
+    }
+    ret = sysdb_create_override_template(sysdb, template_dn,
+                                         anchor_chopped, homedir, shell);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "sysdb_create_certmap_container failed.\n");
+        goto done;
+    }
+
+    ret = sysdb_transaction_commit(sysdb);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "sysdb_transaction_commit failed.\n");
+        goto done;
+    }
+    in_transaction = false;
+
+done:
+    if (in_transaction) {
+        ret = sysdb_transaction_cancel(sysdb);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_CRIT_FAILURE, "Could not cancel transaction.\n");
+        }
+    }
+
+    talloc_free(container_dn);
+    talloc_free(tmp_ctx);
+
+    return ret;
 }

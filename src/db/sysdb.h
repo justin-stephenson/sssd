@@ -207,6 +207,7 @@
 #define SYSDB_VIEW_NAME "viewName"
 #define SYSDB_OVERRIDE_CLASS "override"
 #define SYSDB_OVERRIDE_ANCHOR_UUID "overrideAnchorUUID"
+#define SYSDB_OVERRIDE_ANCHOR "overrideAnchor"
 #define SYSDB_OVERRIDE_USER_CLASS "userOverride"
 #define SYSDB_OVERRIDE_GROUP_CLASS "groupOverride"
 #define SYSDB_OVERRIDE_DN "overrideDN"
@@ -630,6 +631,9 @@ errno_t sysdb_update_view_name(struct sysdb_ctx *sysdb, const char *view_name);
 errno_t sysdb_get_view_name(TALLOC_CTX *mem_ctx, struct sysdb_ctx *sysdb,
                             char **view_name);
 
+errno_t sysdb_update_override_template(struct sysdb_ctx *sysdb,
+                                       struct sysdb_attrs *attrs);
+
 errno_t sysdb_update_view_domain_resolution_order(
                                         struct sysdb_ctx *sysdb,
                                         const char *domain_resolution_order);
@@ -668,6 +672,9 @@ errno_t sysdb_invalidate_overrides(struct sysdb_ctx *sysdb);
 errno_t sysdb_apply_default_override(struct sss_domain_info *domain,
                                      struct sysdb_attrs *override_attrs,
                                      struct ldb_dn *obj_dn);
+errno_t sysdb_apply_default_override_template(TALLOC_CTX *mem_ctx,
+                                              struct sss_domain_info *domain,
+                                              struct ldb_dn *obj_dn);
 
 errno_t sysdb_search_by_orig_dn(TALLOC_CTX *mem_ctx,
                                 struct sss_domain_info *domain,
