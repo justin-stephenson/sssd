@@ -48,6 +48,7 @@
 #define OBJECTCLASS "objectClass"
 
 #define IPA_ASSIGNED_ID_VIEW "ipaAssignedIDView"
+#define IPA_ANCHOR_UUID "ipaAnchorUUID"
 
 #define IPA_DOMAIN_RESOLUTION_ORDER "ipaDomainResolutionOrder"
 
@@ -1779,6 +1780,207 @@ static errno_t ipa_subdomains_view_name_recv(struct tevent_req *req)
     return EOK;
 }
 
+struct ipa_subdomains_view_template_state {
+    struct ipa_subdomains_ctx *sd_ctx;
+    struct sysdb_attrs *override_attrs;
+    struct sss_domain_info *domain;
+    const char *view_name;
+    const char *trusted_name;
+    const char *trusted_id;
+};
+
+static void ipa_subdomains_view_template_done(struct tevent_req *subreq);
+
+static struct tevent_req *
+ipa_subdomains_view_template_send(TALLOC_CTX *mem_ctx,
+                                  struct tevent_context *ev,
+                                  struct ipa_subdomains_ctx *sd_ctx,
+                                  struct sdap_handle *sh)
+{
+    struct ipa_subdomains_view_template_state *state;
+    struct tevent_req *subreq;
+    struct tevent_req *req;
+    const char *attrs[] = { IPA_ANCHOR_UUID, SYSDB_HOMEDIR, SYSDB_SHELL, NULL };
+    char *base;
+    char *ldap_basedn;
+    char *filter;
+    struct sss_domain_info *d = NULL;
+    errno_t ret;
+
+    req = tevent_req_create(mem_ctx, &state,
+                            struct ipa_subdomains_view_template_state);
+    if (req == NULL) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "tevent_req_create() failed\n");
+        return NULL;
+    }
+
+    state->sd_ctx = sd_ctx;
+    state->override_attrs = NULL;
+    state->domain = sd_ctx->be_ctx->domain;
+    state->view_name = sd_ctx->ipa_id_ctx->view_name;
+
+    /* FIXME: Handle multiple subdomains ? */
+    /* Check for trusted domain ID, skip parent domain */
+    for (d = get_next_domain(state->domain, SSS_GND_DESCEND);
+         d && IS_SUBDOMAIN(d);
+         d = get_next_domain(d, 0)) {
+
+        DEBUG(SSSDBG_TRACE_ALL, "JS-checking [%s].\n", d->name);
+        DEBUG(SSSDBG_TRACE_ALL, "JS-domain ID is [%s].\n", d->domain_id);
+        state->trusted_id = talloc_strdup(state, d->domain_id);
+        if (state->trusted_id == NULL) {
+            DEBUG(SSSDBG_OP_FAILURE, "talloc_asprintf failed.\n");
+            ret = ENOMEM;
+            goto immediately;
+        }
+
+        state->trusted_name = talloc_strdup(state, d->name);
+        if (state->trusted_name == NULL) {
+            DEBUG(SSSDBG_OP_FAILURE, "talloc_asprintf failed.\n");
+            ret = ENOMEM;
+            goto immediately;
+        }
+    }
+
+    ret = domain_to_basedn(state, sd_ctx->be_ctx->domain->name, &ldap_basedn);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "domain_to_basedn failed.\n");
+        goto immediately;
+    }
+
+    /* Only retrieve override templates by searching for global
+     * (ipaanchoruuid=:SID:S-1-5-11) or domain
+     * (ipaanchoruuid=:SID:$domain_id-545) template SID values explicitly */
+    filter = talloc_asprintf(state, "(|(%s=:SID:%s-545)(%s=:SID:S-1-5-11))",
+                             IPA_ANCHOR_UUID, state->trusted_id, IPA_ANCHOR_UUID);
+    if (filter == NULL) {
+        ret = ENOMEM;
+        goto immediately;
+    }
+
+    DEBUG(SSSDBG_TRACE_ALL,
+          "Searching for overrides in view [%s] with filter [%s].\n",
+          state->view_name, filter);
+
+    base = talloc_asprintf(state, "cn=%s,cn=views,cn=accounts,%s",
+                           state->view_name, ldap_basedn);
+    if (base == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "talloc_asprintf failed.\n");
+        ret = ENOMEM;
+        goto immediately;
+    }
+
+    subreq = sdap_get_generic_send(state, ev, sd_ctx->sdap_id_ctx->opts,
+                                 sh, base,
+                                 LDAP_SCOPE_SUBTREE,
+                                 filter, attrs,
+                                 NULL,
+                                 0,
+                                 dp_opt_get_int(state->sd_ctx->sdap_id_ctx->opts->basic,
+                                                SDAP_SEARCH_TIMEOUT),
+                                 false);
+    if (subreq == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "sdap_get_generic_send failed.\n");
+        ret = ENOMEM;
+        goto immediately;
+    }
+
+    tevent_req_set_callback(subreq, ipa_subdomains_view_template_done, req);
+
+    return req;
+
+immediately:
+    if (ret == EOK) {
+        tevent_req_done(req);
+    } else {
+        tevent_req_error(req, ret);
+    }
+    tevent_req_post(req, ev);
+
+    return req;
+}
+
+static void ipa_subdomains_view_template_done(struct tevent_req *subreq)
+{
+    struct ipa_subdomains_view_template_state *state;
+    struct tevent_req *req;
+    size_t reply_count;
+    struct sysdb_attrs **reply;
+    const char *homedir = NULL;
+    const char *shell = NULL;
+    const char *anchor = NULL;
+    errno_t ret;
+
+    req = tevent_req_callback_data(subreq, struct tevent_req);
+    state = tevent_req_data(req, struct ipa_subdomains_view_template_state);
+
+    ret = sdap_get_generic_recv(subreq, state, &reply_count, &reply);
+    talloc_zfree(subreq);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE, "ipa_subdomains_view_template request failed.\n");
+        goto done;
+    }
+
+    if (reply_count == 0) {
+        DEBUG(SSSDBG_TRACE_ALL, "No override template found.\n");
+        tevent_req_done(req);
+        return;
+    }
+
+    DEBUG(SSSDBG_TRACE_FUNC,
+          "Found [%zu] overrides\n",
+          reply_count);
+
+    for (int c = 0; c < reply_count; c++) {
+        /* ether HOMEDIR and/or SHELL must be present, we don't need to check if ret != EOK */
+        sysdb_attrs_get_string(reply[c], SYSDB_HOMEDIR, &homedir);
+        sysdb_attrs_get_string(reply[c], SYSDB_SHELL, &shell);
+
+        ret = sysdb_attrs_get_string(reply[c], "ipaAnchorUUID", &anchor);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE,
+                  "sysdb_attrs_get_string failed: [%d](%s)\n",
+                  ret, sss_strerror(ret));
+            goto done;
+        }
+
+        /* Add override templates into cache */
+        ret = sysdb_update_override_template(state->domain->sysdb, state->view_name,
+                                             homedir, shell, reply[c]);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE, "Unable to update override templates in sysdb.\n");
+            goto done;
+        }
+        DEBUG(SSSDBG_TRACE_FUNC, "JS-added ID override templates to cache\n");
+
+        /* Add any domain templates to the cache objects for the domains */
+        if (strstr(anchor, "-545") != NULL) {
+            ret = sysdb_domain_update_domain_template(state->domain, state->domain->sysdb, state->trusted_name,
+                                                      homedir, shell);
+            if (ret != EOK) {
+                DEBUG(SSSDBG_OP_FAILURE, "sysdb_domain_update_domain_template failed.\n");
+                goto done;
+            }
+            DEBUG(SSSDBG_TRACE_FUNC, "JS-added ID override domain templates to domain objects in cache\n");
+        }
+    }
+
+done:
+    if (ret != EOK) {
+        tevent_req_error(req, ret);
+        return;
+    }
+
+    tevent_req_done(req);
+}
+
+static errno_t ipa_subdomains_view_template_recv(struct tevent_req *req)
+{
+    TEVENT_REQ_RETURN_ON_ERROR(req);
+
+    return EOK;
+}
+
 struct ipa_subdomains_view_domain_resolution_order_state {
     struct sss_domain_info *domain;
     const char *view_name;
@@ -2645,6 +2847,7 @@ static void ipa_subdomains_refresh_passkey_done(struct tevent_req *subreq);
 static void ipa_subdomains_refresh_master_done(struct tevent_req *subreq);
 static void ipa_subdomains_refresh_slave_done(struct tevent_req *subreq);
 static void ipa_subdomains_refresh_view_name_done(struct tevent_req *subreq);
+static void ipa_subdomains_refresh_view_template_done(struct tevent_req *subreq);
 static void ipa_subdomains_refresh_view_domain_resolution_order_done(
                                                     struct tevent_req *subreq);
 static void ipa_domain_refresh_resolution_order_done(struct tevent_req *subreq);
@@ -2910,6 +3113,36 @@ static void ipa_subdomains_refresh_view_name_done(struct tevent_req *subreq)
     if (ret != EOK) {
         DEBUG(SSSDBG_CRIT_FAILURE,
               "Unable to get view name [%d]: %s\n",
+              ret, sss_strerror(ret));
+        /* Not good, but let's try to continue with other server side options */
+    }
+
+    subreq = ipa_subdomains_view_template_send(state, state->ev, state->sd_ctx,
+                                           sdap_id_op_handle(state->sdap_op));
+    if (subreq == NULL) {
+        tevent_req_error(req, ENOMEM);
+        return;
+    }
+
+    tevent_req_set_callback(subreq, ipa_subdomains_refresh_view_template_done,
+                            req);
+    return;
+}
+
+static void ipa_subdomains_refresh_view_template_done(struct tevent_req *subreq)
+{
+    struct ipa_subdomains_refresh_state *state;
+    struct tevent_req *req;
+    errno_t ret;
+
+    req = tevent_req_callback_data(subreq, struct tevent_req);
+    state = tevent_req_data(req, struct ipa_subdomains_refresh_state);
+
+    ret = ipa_subdomains_view_template_recv(subreq);
+    talloc_zfree(subreq);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+              "Unable to get ID override templates [%d]: %s\n",
               ret, sss_strerror(ret));
         /* Not good, but let's try to continue with other server side options */
     }

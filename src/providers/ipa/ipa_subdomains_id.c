@@ -1713,7 +1713,16 @@ static errno_t ipa_get_trusted_apply_override_step(struct tevent_req *req)
             DEBUG(SSSDBG_OP_FAILURE, "sysdb_apply_default_override failed.\n");
             return ret;
         }
+    } else {
+        ret = sysdb_apply_default_override_template(state,
+                                                    state->obj_dom,
+                                                    state->obj_msg->dn);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE, "sysdb_apply_default_override_template failed.\n");
+            return ret;
+        }
     }
+
 
     entry_type = (state->ar->entry_type & BE_REQ_TYPE_MASK);
     if (entry_type != BE_REQ_INITGROUPS
