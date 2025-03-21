@@ -38,6 +38,7 @@
 #define TEST_CONF_FILE "tests_conf.ldb"
 
 #define TEST_ANCHOR_PREFIX ":ANCHOR:"
+#define TEST_ANCHOR_TEMPLATE_PREFIX ":SID:"
 #define TEST_VIEW_NAME "test view"
 #define TEST_VIEW_CONTAINER "cn=" TEST_VIEW_NAME ",cn=views,cn=sysdb"
 #define TEST_USER_NAME "test_user"
@@ -47,6 +48,9 @@
 #define TEST_USER_HOMEDIR "/home/home"
 #define TEST_USER_SHELL "/bin/shell"
 #define TEST_USER_SID "S-1-2-3-4"
+#define TEST_GLOBAL_TEMPLATE_SID "S-1-5-11"
+#define TEST_DOMAIN_TEMPLATE_SID "S-1-5-21-3044487217-4285925784-991641718-545"
+#define TEST_DOMAIN_TWO_TEMPLATE_SID "S-1-5-21-644878228-3836315275-1841415914-545"
 #define TEST_GID_OVERRIDE_BASE 100
 
 struct sysdb_test_ctx {
@@ -514,6 +518,178 @@ void test_sysdb_invalidate_overrides(void **state)
 
     ret = sysdb_delete_user(test_ctx->domain, name, 0);
     assert_int_equal(ret, EOK);
+}
+
+/* assert templates in cache  */
+void template_test_assert_cache(struct sysdb_test_ctx *test_ctx,
+                                size_t template_ct,
+                                const char *homedir,
+                                const char *shell,
+                                bool global)
+{
+    struct ldb_dn *basedn;
+    size_t count;
+    int ret;
+    struct ldb_dn *template_dn;
+    struct ldb_message **msgs;
+    const char *anchor;
+    const char *template_sid = global ? TEST_GLOBAL_TEMPLATE_SID : TEST_DOMAIN_TEMPLATE_SID;
+
+    basedn = ldb_dn_new(test_ctx, test_ctx->domain->sysdb->ldb,
+                        TEST_VIEW_CONTAINER);
+    assert_non_null(basedn);
+
+    ret = sysdb_search_entry(test_ctx, test_ctx->domain->sysdb, basedn,
+                             LDB_SCOPE_SUBTREE, NULL, NULL, &count, &msgs);
+    assert_int_equal(ret, EOK);
+    assert_int_equal(count, template_ct);
+    template_dn = msgs[0]->dn;
+    assert_non_null(template_dn);
+
+    anchor = talloc_asprintf(test_ctx, "SID:%s", template_sid);
+
+    assert_string_equal(anchor, ldb_msg_find_attr_as_string(msgs[0],
+                                                            SYSDB_OVERRIDE_ANCHOR_UUID, NULL));
+    if (shell != NULL) {
+        assert_string_equal(TEST_USER_SHELL, ldb_msg_find_attr_as_string(msgs[0],
+                                                             SYSDB_SHELL, NULL));
+    } else {
+        assert_null(ldb_msg_find_attr_as_string(msgs[0], SYSDB_SHELL, NULL));
+    }
+
+    if (homedir != NULL) {
+        assert_string_equal(TEST_USER_HOMEDIR, ldb_msg_find_attr_as_string(msgs[0],
+                                                                           SYSDB_HOMEDIR, NULL));
+    } else {
+        assert_null(ldb_msg_find_attr_as_string(msgs[0], SYSDB_HOMEDIR, NULL));
+    }
+
+
+    /* Cleanup */
+    ret = sysdb_delete_entry(test_ctx->domain->sysdb,
+                             template_dn, false);
+    assert_int_equal(ret, EOK);
+}
+
+static void test_sysdb_update_override_global_template(void **state)
+{
+    int ret;
+    struct sysdb_attrs *attrs;
+    struct sysdb_test_ctx *test_ctx = talloc_get_type_abort(*state,
+                                                         struct sysdb_test_ctx);
+    attrs = sysdb_new_attrs(test_ctx);
+    assert_non_null(attrs);
+
+    ret = sysdb_attrs_add_string(attrs, "ipaAnchorUUID",
+                                 TEST_ANCHOR_TEMPLATE_PREFIX TEST_GLOBAL_TEMPLATE_SID);
+    assert_int_equal(ret, EOK);
+
+    /* Shell only */
+    ret = sysdb_update_override_template(test_ctx->domain->sysdb, TEST_VIEW_NAME,
+                                         TEST_ANCHOR_TEMPLATE_PREFIX TEST_GLOBAL_TEMPLATE_SID,
+                                         NULL, TEST_USER_SHELL);
+    assert_int_equal(ret, EOK);
+
+    template_test_assert_cache(test_ctx, 1, NULL, TEST_USER_SHELL, true);
+
+    /* Homedir only */
+    ret = sysdb_update_override_template(test_ctx->domain->sysdb, TEST_VIEW_NAME,
+                                         TEST_ANCHOR_TEMPLATE_PREFIX TEST_GLOBAL_TEMPLATE_SID,
+                                         TEST_USER_HOMEDIR, NULL);
+    assert_int_equal(ret, EOK);
+
+    template_test_assert_cache(test_ctx, 1, TEST_USER_HOMEDIR, NULL, true);
+
+    /* Both attributes */
+    ret = sysdb_update_override_template(test_ctx->domain->sysdb, TEST_VIEW_NAME,
+                                         TEST_ANCHOR_TEMPLATE_PREFIX TEST_GLOBAL_TEMPLATE_SID,
+                                         TEST_USER_HOMEDIR, TEST_USER_SHELL);
+    assert_int_equal(ret, EOK);
+
+    template_test_assert_cache(test_ctx, 1, TEST_USER_HOMEDIR, TEST_USER_SHELL, true);
+}
+
+static void test_sysdb_update_override_domain_template(void **state)
+{
+    int ret;
+    struct sysdb_attrs *attrs;
+    struct sysdb_test_ctx *test_ctx = talloc_get_type_abort(*state,
+                                                         struct sysdb_test_ctx);
+    attrs = sysdb_new_attrs(test_ctx);
+    assert_non_null(attrs);
+
+    ret = sysdb_attrs_add_string(attrs, "ipaAnchorUUID",
+                                 TEST_ANCHOR_TEMPLATE_PREFIX TEST_DOMAIN_TEMPLATE_SID);
+    assert_int_equal(ret, EOK);
+
+    /* Shell only */
+    ret = sysdb_update_override_template(test_ctx->domain->sysdb, TEST_VIEW_NAME,
+                                         TEST_ANCHOR_TEMPLATE_PREFIX TEST_DOMAIN_TEMPLATE_SID,
+                                         NULL, TEST_USER_SHELL);
+    assert_int_equal(ret, EOK);
+
+    template_test_assert_cache(test_ctx, 1, NULL, TEST_USER_SHELL, false);
+
+    /* Homedir only */
+    ret = sysdb_update_override_template(test_ctx->domain->sysdb, TEST_VIEW_NAME,
+                                         TEST_ANCHOR_TEMPLATE_PREFIX TEST_DOMAIN_TEMPLATE_SID,
+                                         TEST_USER_HOMEDIR, NULL);
+    assert_int_equal(ret, EOK);
+
+    template_test_assert_cache(test_ctx, 1, TEST_USER_HOMEDIR, NULL, false);
+
+    /* Both attributes */
+    ret = sysdb_update_override_template(test_ctx->domain->sysdb, TEST_VIEW_NAME,
+                                         TEST_ANCHOR_TEMPLATE_PREFIX TEST_DOMAIN_TEMPLATE_SID,
+                                         TEST_USER_HOMEDIR, TEST_USER_SHELL);
+    assert_int_equal(ret, EOK);
+
+    template_test_assert_cache(test_ctx, 1, TEST_USER_HOMEDIR, TEST_USER_SHELL, false);
+}
+
+/* Single global and multiple domain templates */
+static void test_sysdb_update_override_multi_template(void **state)
+{
+    int ret;
+    struct sysdb_attrs *attrs;
+    struct ldb_dn *basedn;
+    size_t count;
+    struct ldb_message **msgs;
+    struct sysdb_test_ctx *test_ctx = talloc_get_type_abort(*state,
+                                                         struct sysdb_test_ctx);
+
+    attrs = sysdb_new_attrs(test_ctx);
+    assert_non_null(attrs);
+
+    ret = sysdb_attrs_add_string(attrs, "ipaAnchorUUID",
+                                 TEST_ANCHOR_TEMPLATE_PREFIX TEST_DOMAIN_TEMPLATE_SID);
+    assert_int_equal(ret, EOK);
+
+    /* Add one global template and 2 domain templates */
+    ret = sysdb_update_override_template(test_ctx->domain->sysdb, TEST_VIEW_NAME,
+                                         TEST_ANCHOR_TEMPLATE_PREFIX TEST_GLOBAL_TEMPLATE_SID,
+                                         TEST_USER_HOMEDIR, TEST_USER_SHELL);
+    assert_int_equal(ret, EOK);
+
+    ret = sysdb_update_override_template(test_ctx->domain->sysdb, TEST_VIEW_NAME,
+                                         TEST_ANCHOR_TEMPLATE_PREFIX TEST_DOMAIN_TEMPLATE_SID,
+                                         TEST_USER_HOMEDIR, TEST_USER_SHELL);
+    assert_int_equal(ret, EOK);
+
+    ret = sysdb_update_override_template(test_ctx->domain->sysdb, TEST_VIEW_NAME,
+                                         TEST_ANCHOR_TEMPLATE_PREFIX TEST_DOMAIN_TWO_TEMPLATE_SID,
+                                         TEST_USER_HOMEDIR, TEST_USER_SHELL);
+    assert_int_equal(ret, EOK);
+
+    /* assert */
+    basedn = ldb_dn_new(test_ctx, test_ctx->domain->sysdb->ldb,
+                        TEST_VIEW_CONTAINER);
+    assert_non_null(basedn);
+
+    ret = sysdb_search_entry(test_ctx, test_ctx->domain->sysdb, basedn,
+                             LDB_SCOPE_SUBTREE, NULL, NULL, &count, &msgs);
+    assert_int_equal(ret, EOK);
+    assert_int_equal(count, 3);
 }
 
 static const char *users[] = { "alice", "bob", "barney", NULL };
@@ -1093,6 +1269,12 @@ int main(int argc, const char *argv[])
         cmocka_unit_test_setup_teardown(test_sysdb_delete_view_tree,
                                         test_sysdb_setup, test_sysdb_teardown),
         cmocka_unit_test_setup_teardown(test_sysdb_invalidate_overrides,
+                                        test_sysdb_setup, test_sysdb_teardown),
+        cmocka_unit_test_setup_teardown(test_sysdb_update_override_global_template,
+                                        test_sysdb_setup, test_sysdb_teardown),
+        cmocka_unit_test_setup_teardown(test_sysdb_update_override_domain_template,
+                                        test_sysdb_setup, test_sysdb_teardown),
+        cmocka_unit_test_setup_teardown(test_sysdb_update_override_multi_template,
                                         test_sysdb_setup, test_sysdb_teardown),
         cmocka_unit_test_setup_teardown(test_sysdb_enumpwent,
                                         test_enum_users_setup,
