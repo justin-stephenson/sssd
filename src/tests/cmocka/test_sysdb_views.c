@@ -46,18 +46,23 @@
 #define TEST_USER_GID 5678
 #define TEST_USER_GECOS "Gecos field"
 #define TEST_USER_HOMEDIR "/home/home"
+#define TEST_OVERRIDE_HOMEDIR "/home/testoverride"
 #define TEST_USER_SHELL "/bin/shell"
+#define TEST_OVERRIDE_SHELL "/bin/zsh"
 #define TEST_USER_SID "S-1-2-3-4"
 #define TEST_GLOBAL_TEMPLATE_SID "S-1-5-11"
 #define TEST_DOMAIN_TEMPLATE_SID "S-1-5-21-3044487217-4285925784-991641718-545"
 #define TEST_DOMAIN_TWO_TEMPLATE_SID "S-1-5-21-644878228-3836315275-1841415914-545"
 #define TEST_GID_OVERRIDE_BASE 100
+#define TEST_SUBDOM_NAME "subdomname"
+#define TEST_SUBDOM_FLATNAME "subdomflatname"
 
 struct sysdb_test_ctx {
     struct sysdb_ctx *sysdb;
     struct confdb_ctx *confdb;
     struct tevent_context *ev;
     struct sss_domain_info *domain;
+    struct sss_domain_info *subdomain;
 };
 
 static int _setup_sysdb_tests(struct sysdb_test_ctx **ctx, bool enumerate)
@@ -692,6 +697,103 @@ static void test_sysdb_update_override_multi_template(void **state)
     assert_int_equal(count, 3);
 }
 
+static void test_sysdb_domain_update_domain_template(void **state)
+{
+    int ret;
+    struct sysdb_test_ctx *test_ctx = talloc_get_type_abort(*state,
+                                                         struct sysdb_test_ctx);
+    const char *const dom1[5] = { "dom1.sub", "DOM1.SUB",
+                                  "DOM1", "S-1", "DOM1.SUB" };
+
+    ret = sysdb_subdomain_store(test_ctx->domain->sysdb,
+                                dom1[0], dom1[1], dom1[2], dom1[0], dom1[3],
+                                MPG_DISABLED, false, dom1[4], 0, IPA_TRUST_UNKNOWN,
+                                NULL);
+    assert_int_equal(ret, EOK);
+    ret = sysdb_update_subdomains(test_ctx->domain,
+                                  test_ctx->confdb);
+    assert_int_equal(ret, EOK);
+    ret = sysdb_domain_update_domain_template(test_ctx->domain, test_ctx->domain->sysdb, TEST_SUBDOM_NAME,
+                                              TEST_USER_HOMEDIR, TEST_USER_SHELL);
+    DEBUG(SSSDBG_TRACE_FUNC, "JS-ret is [%d], [%s]\n", ret, sss_strerror(ret));
+    assert_int_equal(ret, EOK);
+}
+
+static void test_sysdb_store_override_template(void **state)
+{
+    int ret;
+    struct ldb_message *msg;
+    struct ldb_message **msgs;
+    struct sysdb_attrs *attrs;
+    size_t count;
+    char *name;
+    struct sysdb_test_ctx *test_ctx = talloc_get_type_abort(*state,
+                                                         struct sysdb_test_ctx);
+    const char override_dn_str[] = SYSDB_OVERRIDE_ANCHOR_UUID "=" \
+                       TEST_ANCHOR_PREFIX TEST_USER_SID "," TEST_VIEW_CONTAINER;
+
+    test_ctx->domain->mpg_mode = MPG_DISABLED;
+    name = sss_create_internal_fqname(test_ctx, TEST_USER_NAME,
+                                      test_ctx->domain->name);
+    assert_non_null(name);
+
+    /* Store user */
+    ret = sysdb_store_user(test_ctx->domain, name, NULL,
+                           TEST_USER_UID, TEST_USER_GID, TEST_USER_GECOS,
+                           TEST_USER_HOMEDIR, TEST_USER_SHELL, NULL, NULL, NULL,
+                           0,0);
+    assert_int_equal(ret, EOK);
+
+    /* Get user DN */
+    ret = sysdb_search_user_by_name(test_ctx, test_ctx->domain, name,
+                                    NULL, &msg);
+    assert_int_equal(ret, EOK);
+    assert_non_null(msg);
+
+    attrs = sysdb_new_attrs(test_ctx);
+    assert_non_null(attrs);
+
+    /* Add override with anchor */
+    ret = sysdb_attrs_add_string(attrs, SYSDB_OVERRIDE_ANCHOR_UUID,
+                                 TEST_ANCHOR_PREFIX TEST_USER_SID);
+    assert_int_equal(ret, EOK);
+
+    ret = sysdb_store_override(test_ctx->domain, NULL, NULL, TEST_VIEW_NAME,
+                               SYSDB_MEMBER_USER, attrs, msg->dn);
+    assert_int_equal(ret, EOK);
+
+    ret = sysdb_search_entry(test_ctx, test_ctx->domain->sysdb,msg->dn,
+                             LDB_SCOPE_BASE, NULL, NULL, &count, &msgs);
+    assert_int_equal(ret, EOK);
+    assert_int_equal(count, 1);
+    assert_string_equal(override_dn_str, ldb_msg_find_attr_as_string(msgs[0],
+                                                      SYSDB_OVERRIDE_DN, NULL));
+
+    /* Add override templates */
+    ret = sysdb_search_user_by_name(test_ctx, test_ctx->domain, name,
+                                    NULL, &msg);
+    assert_int_equal(ret, EOK);
+    assert_non_null(msg);
+
+    /* Same attrs */
+    ret = sysdb_store_override(test_ctx->domain, TEST_OVERRIDE_HOMEDIR, TEST_OVERRIDE_SHELL, TEST_VIEW_NAME,
+                               SYSDB_MEMBER_USER, attrs, msg->dn);
+    assert_int_equal(ret, EOK);
+    /* Lookup user */
+    ret = sysdb_search_entry(test_ctx, test_ctx->domain->sysdb,msg->dn,
+                             LDB_SCOPE_BASE, NULL, NULL, &count, &msgs);
+    assert_int_equal(ret, EOK);
+    assert_int_equal(count, 1);
+    assert_string_equal(TEST_OVERRIDE_HOMEDIR,
+                        ldb_msg_find_attr_as_string(msgs[0], SYSDB_HOMEDIR, NULL));
+    assert_string_equal(TEST_OVERRIDE_SHELL,
+                        ldb_msg_find_attr_as_string(msgs[0], SYSDB_SHELL, NULL));
+
+    ret = sysdb_invalidate_overrides(test_ctx->domain->sysdb);
+    assert_int_equal(ret, EOK);
+
+}
+
 static const char *users[] = { "alice", "bob", "barney", NULL };
 
 static void enum_test_user_override(struct sysdb_test_ctx *test_ctx,
@@ -1276,6 +1378,10 @@ int main(int argc, const char *argv[])
                                         test_sysdb_setup, test_sysdb_teardown),
         cmocka_unit_test_setup_teardown(test_sysdb_update_override_multi_template,
                                         test_sysdb_setup, test_sysdb_teardown),
+//        cmocka_unit_test_setup_teardown(test_sysdb_store_override_template,
+//                                        test_sysdb_setup, test_sysdb_teardown),
+//        cmocka_unit_test_setup_teardown(test_sysdb_domain_update_domain_template,
+//                                        test_sysdb_setup, test_sysdb_teardown),
         cmocka_unit_test_setup_teardown(test_sysdb_enumpwent,
                                         test_enum_users_setup,
                                         test_enum_users_teardown),
