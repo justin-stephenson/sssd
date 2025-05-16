@@ -13,6 +13,7 @@ from sssd_test_framework.topology import KnownTopology, KnownTopologyGroup
 
 
 @pytest.mark.topology(KnownTopologyGroup.AnyProvider)
+@pytest.mark.preferred_topology(KnownTopology.LDAP)
 @pytest.mark.importance("critical")
 def test_access_control_simple__permits_user_login(client: Client, provider: GenericProvider):
     """
@@ -43,6 +44,7 @@ def test_access_control_simple__permits_user_login(client: Client, provider: Gen
 
 
 @pytest.mark.topology(KnownTopologyGroup.AnyProvider)
+@pytest.mark.preferred_topology(KnownTopology.LDAP)
 @pytest.mark.importance("critical")
 def test_access_control_simple__deny_user_login(client: Client, provider: GenericProvider):
     """
@@ -72,6 +74,7 @@ def test_access_control_simple__deny_user_login(client: Client, provider: Generi
 
 
 @pytest.mark.topology(KnownTopologyGroup.AnyProvider)
+@pytest.mark.preferred_topology(KnownTopology.LDAP)
 @pytest.mark.importance("critical")
 def test_access_control_simple__permits_user_login_based_on_group(client: Client, provider: GenericProvider):
     """
@@ -113,6 +116,7 @@ def test_access_control_simple__permits_user_login_based_on_group(client: Client
 
 
 @pytest.mark.topology(KnownTopologyGroup.AnyProvider)
+@pytest.mark.preferred_topology(KnownTopology.LDAP)
 @pytest.mark.importance("critical")
 def test_access_control_simple__deny_group_supersedes_allow_group(client: Client, provider: GenericProvider):
     """

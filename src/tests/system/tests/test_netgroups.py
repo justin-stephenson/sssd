@@ -19,6 +19,7 @@ from sssd_test_framework.topology import KnownTopology, KnownTopologyGroup
 @pytest.mark.cache
 @pytest.mark.ticket(gh=6652, bz=2162552)
 @pytest.mark.topology(KnownTopologyGroup.AnyProvider)
+@pytest.mark.preferred_topology(KnownTopology.LDAP)
 def test_netgroups__add_remove_netgroup_triple(client: Client, provider: GenericProvider):
     """
     :title: Netgroup triple is correctly removed from cached record
@@ -63,6 +64,7 @@ def test_netgroups__add_remove_netgroup_triple(client: Client, provider: Generic
 @pytest.mark.cache
 @pytest.mark.ticket(gh=6652, bz=2162552)
 @pytest.mark.topology(KnownTopologyGroup.AnyProvider)
+@pytest.mark.preferred_topology(KnownTopology.LDAP)
 def test_netgroups__add_remove_netgroup_member(client: Client, provider: GenericProvider):
     """
     :title: Netgroup member is correctly removed from cached record
@@ -117,6 +119,7 @@ def test_netgroups__add_remove_netgroup_member(client: Client, provider: Generic
 @pytest.mark.topology(KnownTopology.LDAP)
 @pytest.mark.topology(KnownTopology.AD)
 @pytest.mark.topology(KnownTopology.Samba)
+@pytest.mark.preferred_topology(KnownTopology.LDAP)
 def test_netgroup__user_attribute_membernisnetgroup_uses_group_dn(client: Client, provider: GenericProvider):
     """
     :title: User's 'memberNisNetgroup' attribute values are the DN of the group
@@ -159,6 +162,7 @@ def test_netgroup__user_attribute_membernisnetgroup_uses_group_dn(client: Client
 @pytest.mark.topology(KnownTopology.LDAP)
 @pytest.mark.topology(KnownTopology.AD)
 @pytest.mark.topology(KnownTopology.Samba)
+@pytest.mark.preferred_topology(KnownTopology.LDAP)
 def test_netgroup__lookup_nested_groups(client: Client, provider: GenericProvider):
     """
     :title: Looking up nested netgroups
@@ -206,6 +210,7 @@ def test_netgroup__lookup_nested_groups(client: Client, provider: GenericProvide
 @pytest.mark.topology(KnownTopology.LDAP)
 @pytest.mark.topology(KnownTopology.AD)
 @pytest.mark.topology(KnownTopology.Samba)
+@pytest.mark.preferred_topology(KnownTopology.LDAP)
 def test_netgroup__lookup_nested_groups_with_host_and_domain_values_present(
     client: Client, provider: GenericProvider, user: str, domain: str, expected: str
 ):
