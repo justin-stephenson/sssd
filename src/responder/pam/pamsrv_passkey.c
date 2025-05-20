@@ -379,14 +379,11 @@ done:
     return ret;
 }
 
-static errno_t passkey_local_verification(TALLOC_CTX *mem_ctx,
-                                          struct passkey_ctx *pctx,
-                                          struct confdb_ctx *cdb,
-                                          struct sysdb_ctx *sysdb,
-                                          const char *domain_name,
-                                          struct pk_child_user_data *pk_data,
-                                          enum passkey_user_verification *_user_verification,
-                                          bool *_debug_libfido2)
+ errno_t passkey_local_verification(struct confdb_ctx *cdb,
+                                    struct sysdb_ctx *sysdb,
+                                    const char *domain_name,
+                                    enum passkey_user_verification *_user_verification,
+                                    bool *_debug_libfido2)
 {
     TALLOC_CTX *tmp_ctx;
     errno_t ret;
@@ -411,7 +408,7 @@ static errno_t passkey_local_verification(TALLOC_CTX *mem_ctx,
         goto done;
     }
 
-    ret = confdb_get_bool(pctx->pam_ctx->rctx->cdb, CONFDB_PAM_CONF_ENTRY,
+    ret = confdb_get_bool(cdb, CONFDB_PAM_CONF_ENTRY,
                           CONFDB_PAM_PASSKEY_DEBUG_LIBFIDO2, false,
                           &debug_libfido2);
     if (ret != EOK) {
@@ -431,7 +428,7 @@ static errno_t passkey_local_verification(TALLOC_CTX *mem_ctx,
         DEBUG(SSSDBG_TRACE_FUNC, "Passkey verification is being enforced from LDAP\n");
     } else {
         /* No verification set in LDAP, fallback to local sssd.conf setting */
-        ret = confdb_get_string(pctx->pam_ctx->rctx->cdb, tmp_ctx, CONFDB_MONITOR_CONF_ENTRY,
+        ret = confdb_get_string(cdb, tmp_ctx, CONFDB_MONITOR_CONF_ENTRY,
                                 CONFDB_MONITOR_PASSKEY_VERIFICATION, NULL,
                                 &verify_opts);
         if (ret != EOK) {
@@ -682,32 +679,14 @@ void pam_passkey_get_user_done(struct tevent_req *req)
         goto done;
     }
 
-    ret = passkey_local_verification(pctx, pctx, pctx->pam_ctx->rctx->cdb,
-                                            result->domain->sysdb, result->domain->dns_name,
-                                            pk_data, &verification, &debug_libfido2);
+    ret = passkey_local_verification(pctx->pam_ctx->rctx->cdb,
+                                     result->domain->sysdb, result->domain->dns_name,
+                                     &verification, &debug_libfido2);
     if (ret != EOK) {
         DEBUG(SSSDBG_OP_FAILURE,
               "Failed to check passkey verification [%d]: %s\n",
               ret, sss_strerror(ret));
         goto done;
-    }
-
-    /* Preauth respond with prompt_pin true or false based on user verification */
-    if (pctx->pd->cmd == SSS_PAM_PREAUTH) {
-        const char *prompt_pin = verification == PAM_PASSKEY_VERIFICATION_OFF ? "false" : "true";
-
-        ret = pam_add_response(pctx->pd, SSS_PAM_PASSKEY_INFO, strlen(prompt_pin) + 1,
-                               (const uint8_t *) prompt_pin);
-        if (ret != EOK) {
-            DEBUG(SSSDBG_CRIT_FAILURE, "pam_add_response failed. [%d]: %s\n",
-                  ret, sss_strerror(ret));
-            goto done;
-        }
-
-        pctx->pd->pam_status = PAM_SUCCESS;
-        pam_reply(pctx->preq);
-        talloc_free(pk_data);
-        return;
     }
 
     req = pam_passkey_auth_send(pctx, pctx->ev, timeout, debug_libfido2,

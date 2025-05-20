@@ -81,6 +81,11 @@ errno_t process_passkey_data(TALLOC_CTX *mem_ctx,
                              struct ldb_message *user_mesg,
                              const char *domain,
                              struct pk_child_user_data *_data);
+errno_t passkey_local_verification(struct confdb_ctx *cdb,
+                                   struct sysdb_ctx *sysdb,
+                                   const char *domain_name,
+                                   enum passkey_user_verification *_user_verification,
+                                   bool *_debug_libfido2);
 bool may_do_passkey_auth(struct pam_ctx *pctx,
                          struct pam_data *pd);
 

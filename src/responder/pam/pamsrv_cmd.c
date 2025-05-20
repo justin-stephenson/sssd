@@ -1219,6 +1219,9 @@ void pam_reply(struct pam_auth_req *preq)
     bool local_passkey_auth_allow = false;
 #ifdef BUILD_PASSKEY
     bool pk_preauth_done = false;
+    enum passkey_user_verification verification = PAM_PASSKEY_VERIFICATION_OMIT;
+    const char *prompt_pin;
+    bool debug_libfido2 = false;
 #endif /* BUILD_PASSKEY */
 
     pd = preq->pd;
@@ -1511,7 +1514,32 @@ void pam_reply(struct pam_auth_req *preq)
             && !pk_preauth_done
             && preq->passkey_data_exists
             && local_passkey_auth_allow) {
-            ret = passkey_local(cctx, cctx->ev, pctx, preq, pd);
+            if (pd->cmd == SSS_PAM_PREAUTH) {
+                ret = passkey_local_verification(pctx->rctx->cdb, preq->domain->sysdb,
+                                                 preq->domain->dns_name,
+                                                 &verification, &debug_libfido2);
+                if (ret != EOK) {
+                    DEBUG(SSSDBG_OP_FAILURE,
+                          "Failed to check passkey verification [%d]: %s\n",
+                          ret, sss_strerror(ret));
+                    goto done;
+                }
+
+                prompt_pin = verification == PAM_PASSKEY_VERIFICATION_OFF ? "false" : "true";
+
+                ret = pam_add_response(pd, SSS_PAM_PASSKEY_INFO, strlen(prompt_pin) + 1,
+                                       (const uint8_t *) prompt_pin);
+                if (ret != EOK) {
+                    DEBUG(SSSDBG_CRIT_FAILURE, "pam_add_response failed. [%d]: %s\n",
+                          ret, sss_strerror(ret));
+                    goto done;
+                }
+
+                pd->pam_status = PAM_SUCCESS;
+                pam_reply(preq);
+                return;
+            }
+
             pam_check_user_done(preq, ret);
             return;
         }

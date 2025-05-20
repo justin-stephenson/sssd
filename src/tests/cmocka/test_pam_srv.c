@@ -852,7 +852,7 @@ static int test_pam_passkey_preauth_check(uint32_t status, uint8_t *body, size_t
     assert_int_equal(val, pam_test_ctx->exp_pam_status);
 
     SAFEALIGN_COPY_UINT32(&val, body + rp, &rp);
-    assert_int_equal(val, 2);
+    assert_int_equal(val, 3);
 
     SAFEALIGN_COPY_UINT32(&val, body + rp, &rp);
     assert_int_equal(val, SSS_PAM_DOMAIN_NAME);
@@ -4652,11 +4652,6 @@ void test_pam_passkey_preauth_no_passkey(void **state)
     mock_input_pam_passkey(pam_test_ctx, "pamuser", "1234",
                                          NULL, NULL, NULL);
 
-    /* sss_parse_inp_recv() is called twice
-     * multiple cache req calls */
-    mock_parse_inp("pamuser", NULL, EOK);
-    mock_parse_inp("pamuser", NULL, EOK);
-
     will_return(__wrap_sss_packet_get_cmd, SSS_PAM_PREAUTH);
     will_return(__wrap_sss_packet_get_cmd, SSS_PAM_PREAUTH);
     will_return(__wrap_sss_packet_get_body, WRAP_CALL_REAL);
@@ -4691,7 +4686,6 @@ void test_pam_passkey_preauth_found(void **state)
 
     mock_input_pam_passkey(pam_test_ctx, "pamuser", "1234", NULL,
                                          NULL, SSSD_TEST_PASSKEY);
-    mock_parse_inp("pamuser", NULL, EOK);
 
     will_return(__wrap_sss_packet_get_cmd, SSS_PAM_PREAUTH);
     will_return(__wrap_sss_packet_get_cmd, SSS_PAM_PREAUTH);
@@ -4841,8 +4835,6 @@ void test_pam_passkey_preauth_mapping_multi(void **state)
 
     mock_input_pam_passkey(pam_test_ctx, "pamuser", "1234",
                                          NULL, NULL, SSSD_TEST_PASSKEY);
-
-    mock_parse_inp("pamuser", NULL, EOK);
 
     /* Add passkey data first, then pubkey mapping data */
     passkey_size = strlen(passkey) + 1;
