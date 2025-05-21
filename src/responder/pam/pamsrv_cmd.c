@@ -1219,9 +1219,6 @@ void pam_reply(struct pam_auth_req *preq)
     bool local_passkey_auth_allow = false;
 #ifdef BUILD_PASSKEY
     bool pk_preauth_done = false;
-    enum passkey_user_verification verification = PAM_PASSKEY_VERIFICATION_OMIT;
-    const char *prompt_pin;
-    bool debug_libfido2 = false;
 #endif /* BUILD_PASSKEY */
 
     pd = preq->pd;
@@ -1515,28 +1512,14 @@ void pam_reply(struct pam_auth_req *preq)
             && preq->passkey_data_exists
             && local_passkey_auth_allow) {
             if (pd->cmd == SSS_PAM_PREAUTH) {
-                ret = passkey_local_verification(pctx->rctx->cdb, preq->domain->sysdb,
-                                                 preq->domain->dns_name,
-                                                 &verification, &debug_libfido2);
+                /* execute passkey child preflight operation, in passkey_preflight_done()
+                 * pam_reply is called */
+                ret = passkey_child_execute(cctx, cctx, cctx->ev, preq, pctx, pd, PAM_PASSKEY_OP_PREFLIGHT);
                 if (ret != EOK) {
                     DEBUG(SSSDBG_OP_FAILURE,
-                          "Failed to check passkey verification [%d]: %s\n",
-                          ret, sss_strerror(ret));
+                          "Passkey child execute failed %s [%d].\n", sss_strerror(ret), ret);
                     goto done;
                 }
-
-                prompt_pin = verification == PAM_PASSKEY_VERIFICATION_OFF ? "false" : "true";
-
-                ret = pam_add_response(pd, SSS_PAM_PASSKEY_INFO, strlen(prompt_pin) + 1,
-                                       (const uint8_t *) prompt_pin);
-                if (ret != EOK) {
-                    DEBUG(SSSDBG_CRIT_FAILURE, "pam_add_response failed. [%d]: %s\n",
-                          ret, sss_strerror(ret));
-                    goto done;
-                }
-
-                pd->pam_status = PAM_SUCCESS;
-                pam_reply(preq);
                 return;
             }
 
@@ -1924,6 +1907,7 @@ static int pam_forwarder(struct cli_ctx *cctx, int pam_cmd)
     struct pam_auth_req *preq;
     struct pam_data *pd;
     int ret;
+    enum passkey_child_op passkey_op;
     struct pam_ctx *pctx =
             talloc_get_type(cctx->rctx->pvt_ctx, struct pam_ctx);
     struct tevent_req *req;
@@ -2005,11 +1989,14 @@ static int pam_forwarder(struct cli_ctx *cctx, int pam_cmd)
     if ((pd->cmd == SSS_PAM_AUTHENTICATE)) {
         if (may_do_passkey_auth(pctx, pd)) {
             if (sss_authtok_get_type(pd->authtok) == SSS_AUTHTOK_TYPE_PASSKEY_KRB) {
-                ret = passkey_kerberos(pctx, preq->pd, preq);
-                goto done;
+                passkey_op = PAM_PASSKEY_OP_KERBEROS_AUTH;
             } else if ((sss_authtok_get_type(pd->authtok) == SSS_AUTHTOK_TYPE_PASSKEY) ||
                       (sss_authtok_get_type(pd->authtok) == SSS_AUTHTOK_TYPE_EMPTY)) {
-                ret = passkey_local(cctx, cctx->ev, pctx, preq, pd);
+                passkey_op = PAM_PASSKEY_OP_LOCAL_AUTH;
+            }
+
+            if (passkey_op == PAM_PASSKEY_OP_KERBEROS_AUTH || passkey_op == PAM_PASSKEY_OP_LOCAL_AUTH) {
+                ret = passkey_child_execute(cctx, cctx, cctx->ev, preq, pctx, pd, passkey_op);
                 goto done;
             }
         }
@@ -2376,6 +2363,7 @@ static void pam_forwarder_cb(struct tevent_req *req)
     struct cli_ctx *cctx = preq->cctx;
     struct pam_data *pd;
     errno_t ret = EOK;
+    enum passkey_child_op passkey_op;
     struct pam_ctx *pctx =
             talloc_get_type(preq->cctx->rctx->pvt_ctx, struct pam_ctx);
 
@@ -2425,11 +2413,14 @@ static void pam_forwarder_cb(struct tevent_req *req)
     if ((pd->cmd == SSS_PAM_AUTHENTICATE)) {
         if (may_do_passkey_auth(pctx, pd)) {
             if (sss_authtok_get_type(pd->authtok) == SSS_AUTHTOK_TYPE_PASSKEY_KRB) {
-                ret = passkey_kerberos(pctx, preq->pd, preq);
-                goto done;
+                passkey_op = PAM_PASSKEY_OP_KERBEROS_AUTH;
             } else if ((sss_authtok_get_type(pd->authtok) == SSS_AUTHTOK_TYPE_PASSKEY) ||
                       (sss_authtok_get_type(pd->authtok) == SSS_AUTHTOK_TYPE_EMPTY)) {
-                ret = passkey_local(cctx, cctx->ev, pctx, preq, pd);
+                passkey_op = PAM_PASSKEY_OP_LOCAL_AUTH;
+            }
+
+            if (passkey_op == PAM_PASSKEY_OP_KERBEROS_AUTH || passkey_op == PAM_PASSKEY_OP_LOCAL_AUTH) {
+                ret = passkey_child_execute(cctx, cctx, cctx->ev, preq, pctx, pd, passkey_op);
                 goto done;
             }
         }
