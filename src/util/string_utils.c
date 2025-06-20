@@ -128,6 +128,45 @@ const char *get_last_x_chars(const char *str, size_t x)
     return (str + len - x);
 }
 
+errno_t string_ends_with(const char *str,
+                         const char *suffix)
+{
+    errno_t ret = EOK;
+    int i = 0;
+    const char *p;
+    size_t len;
+    size_t suffix_len;
+
+    if (str == NULL) {
+        ret = EINVAL;
+        goto done;
+    }
+
+    len = strlen(str);
+
+    if (str[len] != '\0') {
+        ret = EINVAL;
+        goto done;
+    }
+
+    suffix_len = strlen(suffix);
+
+    p = str + (len - suffix_len);
+
+    for (; *p != '\0'; p++) {
+        if (suffix[i] != *p) {
+            ret = ENOENT;
+            goto done;
+        }
+        i++;
+    }
+
+    ret = EOK;
+
+done:
+    return ret;
+}
+
 char **concatenate_string_array(TALLOC_CTX *mem_ctx,
                                 char **arr1, size_t len1,
                                 char **arr2, size_t len2)
