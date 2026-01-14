@@ -34,6 +34,7 @@
 struct minimal_init_ctx {
     struct sdap_options *options;
     struct sdap_id_ctx *id_ctx;
+    struct krb5_ctx *auth_ctx;
 };
 
 #endif

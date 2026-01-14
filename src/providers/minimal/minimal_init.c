@@ -34,6 +34,16 @@
 #include "src/providers/minimal/minimal.h"
 #include "src/providers/minimal/minimal_id.h"
 
+/* Copied from krb5_init.c */
+#include <sys/types.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include "providers/krb5/krb5_auth.h"
+#include "providers/krb5/krb5_common.h"
+#include "providers/krb5/krb5_init_shared.h"
+#include "providers/data_provider.h"
+
 /* Copied from ldap_init.c with no changes */
 static errno_t get_sdap_service(TALLOC_CTX *mem_ctx,
                                 struct be_ctx *be_ctx,
@@ -113,6 +123,169 @@ static errno_t ldap_init_misc(struct be_ctx *be_ctx,
     return EOK;
 }
 
+/* Copied from krb5_init.c */
+static errno_t krb5_init_kpasswd(struct krb5_ctx *ctx,
+                                 struct be_ctx *be_ctx)
+{
+    const char *realm;
+    const char *primary_servers;
+    const char *backup_servers;
+    const char *kdc_servers;
+    bool use_kdcinfo;
+    size_t n_lookahead_primary;
+    size_t n_lookahead_backup;
+    errno_t ret;
+
+    realm = dp_opt_get_string(ctx->opts, KRB5_REALM);
+    if (realm == NULL) {
+        DEBUG(SSSDBG_FATAL_FAILURE, "Missing krb5_realm option!\n");
+        return EINVAL;
+    }
+
+    kdc_servers = dp_opt_get_string(ctx->opts, KRB5_KDC);
+    primary_servers = dp_opt_get_string(ctx->opts, KRB5_KPASSWD);
+    backup_servers = dp_opt_get_string(ctx->opts, KRB5_BACKUP_KPASSWD);
+    use_kdcinfo = dp_opt_get_bool(ctx->opts, KRB5_USE_KDCINFO);
+    sss_krb5_parse_lookahead(dp_opt_get_string(ctx->opts, KRB5_KDCINFO_LOOKAHEAD),
+                             &n_lookahead_primary, &n_lookahead_backup);
+
+
+    if (primary_servers == NULL && backup_servers != NULL) {
+        DEBUG(SSSDBG_CONF_SETTINGS, "kpasswd server wasn't specified but "
+              "backup_servers kpasswd given. Using it as primary_servers\n");
+        primary_servers = backup_servers;
+        backup_servers = NULL;
+    }
+
+    if (primary_servers == NULL && kdc_servers != NULL) {
+        DEBUG(SSSDBG_FATAL_FAILURE, "Missing krb5_kpasswd option and KDC set "
+              "explicitly, will use KDC for password change operations!\n");
+        ctx->kpasswd_service = NULL;
+    } else {
+        ret = krb5_service_init(ctx, be_ctx, SSS_KRB5KPASSWD_FO_SRV,
+                                primary_servers, backup_servers, realm,
+                                use_kdcinfo,
+                                n_lookahead_primary,
+                                n_lookahead_backup,
+                                &ctx->kpasswd_service);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_FATAL_FAILURE,
+                  "Failed to init KRB5KPASSWD failover service!\n");
+            return ret;
+        }
+    }
+
+    return EOK;
+}
+
+
+/* Copied from krb5_init.c */
+static errno_t krb5_init_kdc(struct krb5_ctx *ctx, struct be_ctx *be_ctx)
+{
+    const char *primary_servers;
+    const char *backup_servers;
+    const char *realm;
+    bool use_kdcinfo;
+    size_t n_lookahead_primary;
+    size_t n_lookahead_backup;
+    errno_t ret;
+
+    realm = dp_opt_get_string(ctx->opts, KRB5_REALM);
+    if (realm == NULL) {
+        DEBUG(SSSDBG_FATAL_FAILURE, "Missing krb5_realm option!\n");
+        return EINVAL;
+    }
+
+    primary_servers = dp_opt_get_string(ctx->opts, KRB5_KDC);
+    backup_servers = dp_opt_get_string(ctx->opts, KRB5_BACKUP_KDC);
+
+    use_kdcinfo = dp_opt_get_bool(ctx->opts, KRB5_USE_KDCINFO);
+    sss_krb5_parse_lookahead(dp_opt_get_string(ctx->opts, KRB5_KDCINFO_LOOKAHEAD),
+                             &n_lookahead_primary, &n_lookahead_backup);
+
+    ret = krb5_service_init(ctx, be_ctx, SSS_KRB5KDC_FO_SRV,
+                            primary_servers, backup_servers, realm,
+                            use_kdcinfo,
+                            n_lookahead_primary,
+                            n_lookahead_backup,
+                            &ctx->service);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_FATAL_FAILURE, "Failed to init KRB5 failover service!\n");
+        return ret;
+    }
+
+    return EOK;
+}
+
+/* sssm_krb5_init() copied just renamed from krb5_init.c */
+errno_t minimal_init_auth_ctx(TALLOC_CTX *mem_ctx,
+                              struct be_ctx *be_ctx,
+                              struct data_provider *provider,
+                              const char *module_name,
+                              struct krb5_ctx **_module_data)
+{
+    struct krb5_ctx *ctx;
+    errno_t ret;
+
+    ctx = talloc_zero(mem_ctx, struct krb5_ctx);
+    if (ctx == NULL) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "talloc_zero() failed\n");
+        return ENOMEM;
+    }
+
+    ret = sss_krb5_get_options(ctx, be_ctx->cdb, be_ctx->conf_path, &ctx->opts);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "Unable to get krb5 options [%d]: %s\n",
+              ret, sss_strerror(ret));
+        goto done;
+    }
+
+    ctx->action = INIT_PW;
+    ctx->config_type = K5C_GENERIC;
+
+    ret = krb5_init_kdc(ctx, be_ctx);
+    if (ret != EOK) {
+        goto done;
+    }
+
+    ret = krb5_init_kpasswd(ctx, be_ctx);
+    if (ret != EOK) {
+        goto done;
+    }
+
+    ret = krb5_child_init(ctx, be_ctx);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_FATAL_FAILURE, "Could not initialize krb5_child settings "
+              "[%d]: %s\n", ret, sss_strerror(ret));
+        goto done;
+    }
+
+    ret = sss_regexp_new(ctx, ILLEGAL_PATH_PATTERN, 0, &(ctx->illegal_path_re));
+    if (ret != EOK) {
+        ret = EFAULT;
+        goto done;
+    }
+
+    ret = be_fo_set_dns_srv_lookup_plugin(be_ctx, NULL);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "Unable to set SRV lookup plugin "
+              "[%d]: %s\n", ret, sss_strerror(ret));
+        goto done;
+    }
+
+    *_module_data = ctx;
+
+    ret = EOK;
+
+done:
+    if (ret != EOK) {
+        talloc_free(ctx);
+    }
+
+    return ret;
+}
+
+
 errno_t sssm_minimal_init(TALLOC_CTX *mem_ctx,
                       struct be_ctx *be_ctx,
                       struct data_provider *provider,
@@ -163,6 +336,17 @@ errno_t sssm_minimal_init(TALLOC_CTX *mem_ctx,
         goto done;
     }
 
+    /* Initialize krb5 auth_ctx only if DPT_AUTH target is enabled. */
+    if (dp_target_enabled(provider, module_name, DPT_AUTH)) {
+        ret = minimal_init_auth_ctx(init_ctx, be_ctx, provider,
+                                    module_name, &init_ctx->auth_ctx);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_CRIT_FAILURE, "Unable to create auth context "
+                  "[%d]: %s\n", ret, sss_strerror(ret));
+            return ret;
+        }
+    }
+
     *_module_data = init_ctx;
 
     ret = EOK;
@@ -201,4 +385,20 @@ errno_t sssm_minimal_id_init(TALLOC_CTX *mem_ctx,
     ret = EOK;
 
     return ret;
+}
+
+errno_t sssm_minimal_auth_init(TALLOC_CTX *mem_ctx,
+                               struct be_ctx *be_ctx,
+                               void *module_data,
+                               struct dp_method *dp_methods)
+{
+    struct minimal_init_ctx *init_ctx;
+
+    init_ctx = talloc_get_type(module_data, struct minimal_init_ctx);
+
+    dp_set_method(dp_methods, DPM_AUTH_HANDLER,
+                  krb5_pam_handler_send, krb5_pam_handler_recv, init_ctx->auth_ctx,
+                  struct krb5_ctx, struct pam_data, struct pam_data *);
+
+    return EOK;
 }
