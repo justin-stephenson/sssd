@@ -33,6 +33,7 @@
 
 #include "src/providers/minimal/minimal.h"
 #include "src/providers/minimal/minimal_id.h"
+#include "src/providers/minimal/minimal_krb5_auth.h"
 
 /* Copied from krb5_init.c */
 #include <sys/types.h>
@@ -397,7 +398,7 @@ errno_t sssm_minimal_auth_init(TALLOC_CTX *mem_ctx,
     init_ctx = talloc_get_type(module_data, struct minimal_init_ctx);
 
     dp_set_method(dp_methods, DPM_AUTH_HANDLER,
-                  krb5_pam_handler_send, krb5_pam_handler_recv, init_ctx->auth_ctx,
+                  minimal_krb5_pam_handler_send, minimal_krb5_pam_handler_recv, init_ctx->auth_ctx,
                   struct krb5_ctx, struct pam_data, struct pam_data *);
 
     return EOK;

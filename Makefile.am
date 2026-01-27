@@ -4616,6 +4616,7 @@ libsss_minimal_la_SOURCES = \
     src/providers/minimal/minimal_init.c \
     src/providers/minimal/minimal_id.c \
     src/providers/minimal/minimal_id_services.c \
+    src/providers/minimal/minimal_krb5_auth.c \
     $(NULL)
 
 libsss_minimal_la_CFLAGS = \
