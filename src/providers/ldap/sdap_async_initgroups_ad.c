@@ -345,8 +345,8 @@ static errno_t sdap_ad_resolve_sids_step(struct tevent_req *req)
     }
 
     subreq = groups_get_send(state, state->ev, state->id_ctx, sdap_domain,
-                             state->conn, state->current_sid,
-                             BE_FILTER_SECID, false, true, false);
+                             state->current_sid, BE_FILTER_SECID, false,
+                             true, false);
     if (subreq == NULL) {
         return ENOMEM;
     }
@@ -377,8 +377,8 @@ static void sdap_ad_resolve_sids_done(struct tevent_req *subreq)
               state->current_sid);
     } else if (ret != EOK) {
         DEBUG(SSSDBG_CRIT_FAILURE, "Unable to resolve SID %s, "
-              "ret: %d]: %s\n", state->current_sid, ret,
-              strerror(ret));
+              "ret: %d]: %s\n", state->current_sid,
+              ret, strerror(ret));
         goto done;
     }
 

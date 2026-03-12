@@ -2255,7 +2255,7 @@ ad_gpo_connect_done(struct tevent_req *subreq)
 
     subreq = groups_by_user_send(state, state->ev,
                                  state->access_ctx->ad_id_ctx->sdap_id_ctx,
-                                 sdom, state->conn,
+                                 sdom,
                                  search_bases,
                                  state->host_fqdn,
                                  BE_FILTER_NAME,
