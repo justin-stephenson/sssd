@@ -42,7 +42,6 @@
 #include "config.h"
 #include "resolv/async_resolv.h"
 #include "util/util.h"
-#include "util/typeof.h"
 
 struct sss_failover_ctx;
 
