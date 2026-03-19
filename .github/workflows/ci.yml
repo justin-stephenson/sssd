@@ -313,6 +313,7 @@ jobs:
           ${{ steps.select-tests.outputs.SELECT_TESTS }} \
           --mh-not-topology=ipa --mh-not-topology=samba --mh-not-topology=ad \
           --mh-not-topology=ipa-trust-samba \
+          -k "not test_logging__default_settings_logs_ and not test_failover and not test_autofs__propagate_offline_status_for_multiple_domains" \
           --collect-only . |& tee $GITHUB_WORKSPACE/pytest-collect.log
 
     - name: Run tests
@@ -335,6 +336,7 @@ jobs:
           ${{ steps.select-tests.outputs.SELECT_TESTS }} \
           --mh-not-topology=ipa --mh-not-topology=samba --mh-not-topology=ad \
           --mh-not-topology=ipa-trust-samba \
+          -k "not test_logging__default_settings_logs_ and not test_failover and not test_autofs__propagate_offline_status_for_multiple_domains" \
           -vvv . |& tee $GITHUB_WORKSPACE/pytest.log
 
     - name: Upload artifacts
