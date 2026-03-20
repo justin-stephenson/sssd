@@ -92,7 +92,7 @@
                                     "\"name\": \"Passkey\", \"role\": \"passkey\", " \
                                     "\"initInstruction\": \"" PASSKEY_INIT_PROMPT "\", " \
                                     "\"keyConnected\": true, " \
-                                    "\"pinRequest\": true, \"pinAttempts\": 8, " \
+                                    "\"pinRequest\": false, \"pinAttempts\": 8, " \
                                     "\"pinPrompt\": \"" PASSKEY_PIN_PROMPT "\", " \
                                     "\"touchInstruction\": \"" PASSKEY_TOUCH_PROMPT "\", " \
                                     "\"kerberos\": false, " \
@@ -466,7 +466,7 @@ void test_json_format_mechanisms_passkey(void **state)
     auth_data->passkey->enabled = true;
     auth_data->passkey->init_prompt = discard_const(PASSKEY_INIT_PROMPT);
     auth_data->passkey->key_connected = true;
-    auth_data->passkey->pin_request = true;
+    auth_data->passkey->pin_request = false;
     auth_data->passkey->pin_attempts = 8;
     auth_data->passkey->pin_prompt = discard_const(PASSKEY_PIN_PROMPT);
     auth_data->passkey->touch_prompt = discard_const(PASSKEY_TOUCH_PROMPT);
@@ -621,7 +621,7 @@ void test_json_format_auth_selection_passkey(void **state)
     auth_data->passkey->enabled = true;
     auth_data->passkey->init_prompt = discard_const(PASSKEY_INIT_PROMPT);
     auth_data->passkey->key_connected = true;
-    auth_data->passkey->pin_request = true;
+    auth_data->passkey->pin_request = false;
     auth_data->passkey->pin_attempts = 8;
     auth_data->passkey->pin_prompt = discard_const(PASSKEY_PIN_PROMPT);
     auth_data->passkey->touch_prompt = discard_const(PASSKEY_TOUCH_PROMPT);
@@ -678,7 +678,7 @@ void test_json_format_auth_selection_all(void **state)
     auth_data->passkey->enabled = true;
     auth_data->passkey->init_prompt = discard_const(PASSKEY_INIT_PROMPT);
     auth_data->passkey->key_connected = true;
-    auth_data->passkey->pin_request = true;
+    auth_data->passkey->pin_request = false;
     auth_data->passkey->pin_attempts = 8;
     auth_data->passkey->pin_prompt = discard_const(PASSKEY_PIN_PROMPT);
     auth_data->passkey->touch_prompt = discard_const(PASSKEY_TOUCH_PROMPT);
