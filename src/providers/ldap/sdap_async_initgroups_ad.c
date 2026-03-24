@@ -486,6 +486,7 @@ sdap_ad_tokengroups_initgr_mapping_send(TALLOC_CTX *mem_ctx,
     }
 
     subdom_id_ctx = talloc_get_type(sdom->pvt, struct ad_id_ctx);
+    /*
     state->op = sdap_id_op_create(state, subdom_id_ctx->ldap_ctx->conn_cache);
     if (!state->op) {
         DEBUG(SSSDBG_OP_FAILURE, "sdap_id_op_create failed\n");
@@ -498,6 +499,7 @@ sdap_ad_tokengroups_initgr_mapping_send(TALLOC_CTX *mem_ctx,
         ret = ENOMEM;
         goto immediately;
     }
+    */
 
     tevent_req_set_callback(subreq,
                             sdap_ad_tokengroups_initgr_mapping_connect_done,
@@ -528,7 +530,9 @@ sdap_ad_tokengroups_initgr_mapping_connect_done(struct tevent_req *subreq)
                             struct sdap_ad_tokengroups_initgr_mapping_state);
 
 
+    /*
     ret = sdap_id_op_connect_recv(subreq);
+    */
     talloc_zfree(subreq);
 
     if (ret != EOK) {
@@ -537,7 +541,8 @@ sdap_ad_tokengroups_initgr_mapping_connect_done(struct tevent_req *subreq)
     }
 
     subreq = sdap_get_ad_tokengroups_send(state, state->ev, state->opts,
-                                          sdap_id_op_handle(state->op),
+                                          // sdap_id_op_handle(state->op),
+                                          NULL,
                                           state->username,
                                           state->orig_dn, state->timeout);
     if (subreq == NULL) {
@@ -832,6 +837,7 @@ sdap_ad_tokengroups_initgr_posix_send(TALLOC_CTX *mem_ctx,
         }
     }
     subdom_id_ctx = talloc_get_type(sdom->pvt, struct ad_id_ctx);
+    /*
     state->op = sdap_id_op_create(state, subdom_id_ctx->ldap_ctx->conn_cache);
     if (!state->op) {
         DEBUG(SSSDBG_OP_FAILURE, "sdap_id_op_create failed\n");
@@ -844,6 +850,7 @@ sdap_ad_tokengroups_initgr_posix_send(TALLOC_CTX *mem_ctx,
         ret = ENOMEM;
         goto immediately;
     }
+    */
 
     tevent_req_set_callback(subreq,
                             sdap_ad_tokengroups_initgr_posix_sids_connect_done,
@@ -874,7 +881,9 @@ sdap_ad_tokengroups_initgr_posix_sids_connect_done(struct tevent_req *subreq)
                             struct sdap_ad_tokengroups_initgr_posix_state);
 
 
+/*
     ret = sdap_id_op_connect_recv(subreq);
+    */
     talloc_zfree(subreq);
 
     if (ret != EOK) {
@@ -883,7 +892,8 @@ sdap_ad_tokengroups_initgr_posix_sids_connect_done(struct tevent_req *subreq)
     }
 
     subreq = sdap_get_ad_tokengroups_send(state, state->ev, state->opts,
-                                          sdap_id_op_handle(state->op),
+                                          // sdap_id_op_handle(state->op),
+                                          NULL,
                                           state->username, state->orig_dn,
                                           state->timeout);
     if (subreq == NULL) {
@@ -1207,6 +1217,7 @@ sdap_ad_get_domain_local_groups_send(TALLOC_CTX *mem_ctx,
         goto fail;
     }
 
+/*
     state->op = sdap_id_op_create(state, state->conn->conn_cache);
     if (state->op == NULL) {
         DEBUG(SSSDBG_OP_FAILURE, "sdap_id_op_create failed\n");
@@ -1219,7 +1230,7 @@ sdap_ad_get_domain_local_groups_send(TALLOC_CTX *mem_ctx,
         DEBUG(SSSDBG_OP_FAILURE, "sdap_id_op_connect_send failed.\n");
         goto fail;
     }
-
+*/
     tevent_req_set_callback(subreq,
                             sdap_ad_get_domain_local_groups_connect_done, req);
 
@@ -1240,8 +1251,9 @@ sdap_ad_get_domain_local_groups_connect_done(struct tevent_req *subreq)
     struct sdap_ad_get_domain_local_groups_state *state = tevent_req_data(req,
                                   struct sdap_ad_get_domain_local_groups_state);
     int ret;
-
+/*
     ret = sdap_id_op_connect_recv(subreq);
+    */
     talloc_zfree(subreq);
 
     if (ret != EOK) {
@@ -1250,7 +1262,8 @@ sdap_ad_get_domain_local_groups_connect_done(struct tevent_req *subreq)
     }
     subreq = rfc2307bis_nested_groups_send(state, state->ev, state->opts,
                                            state->sysdb, state->dom,
-                                           sdap_id_op_handle(state->op),
+                                           //sdap_id_op_handle(state->op),
+                                           NULL,
                                            state->search_bases,
                                            state->groups, state->num_groups,
                                            state->group_hash, 0);
