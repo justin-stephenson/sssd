@@ -1524,7 +1524,6 @@ struct get_user_and_group_state {
     struct tevent_context *ev;
     struct sdap_id_ctx *id_ctx;
     struct sdap_domain *sdom;
-    struct sdap_id_conn_ctx *conn;
     struct sdap_id_op *op;
     struct sysdb_ctx *sysdb;
     struct sss_domain_info *domain;
@@ -1597,7 +1596,6 @@ static void get_user_and_group_groups_done(struct tevent_req *subreq)
     struct get_user_and_group_state *state = tevent_req_data(req,
                                                struct get_user_and_group_state);
     int ret;
-    struct sdap_id_conn_ctx *user_conn;
 
     ret = groups_get_recv(subreq);
     talloc_zfree(subreq);
@@ -1617,12 +1615,6 @@ static void get_user_and_group_groups_done(struct tevent_req *subreq)
 
     /* Now the search finished fine but did not find an entry.
      * Retry with users. */
-
-    /* Prefer LDAP over GC for users */
-    user_conn = get_ldap_conn_from_sdom_pvt(state->id_ctx->opts, state->sdom);
-    if (user_conn == NULL) {
-        user_conn = state->conn;
-    }
 
     subreq = users_get_send(req, state->ev, state->id_ctx,
                             state->sdom,
