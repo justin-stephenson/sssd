@@ -493,7 +493,6 @@ errno_t ad_account_info_handler_recv(TALLOC_CTX *mem_ctx,
 }
 
 static errno_t ad_get_account_domain_prepare_search(struct tevent_req *req);
-static errno_t ad_get_account_domain_connect_retry(struct tevent_req *req);
 static void ad_get_account_domain_connect_done(struct tevent_req *subreq);
 static void ad_get_account_domain_search(struct tevent_req *req);
 static void ad_get_account_domain_search_done(struct tevent_req *subreq);
@@ -516,7 +515,7 @@ struct ad_get_account_domain_state {
     char *filter;
     const char **attrs;
     struct dp_reply_std reply;
-    struct sdap_id_op *op;
+    struct sss_failover_ldap_connection *conn;
     struct sysdb_attrs **objects;
     size_t count;
 
@@ -628,16 +627,9 @@ ad_get_account_domain_send(TALLOC_CTX *mem_ctx,
      * time rather than setting the flag on first use?
      */
     // id_ctx->gc_ctx->ignore_mark_offline = true;
-    state->op = sdap_id_op_create(state, id_ctx->gc_ctx->conn_cache);
-    if (state->op == NULL) {
-        DEBUG(SSSDBG_OP_FAILURE, "sdap_id_op_create failed\n");
-        ret = ENOMEM;
-        goto immediately;
-    }
-
-    ret = ad_get_account_domain_connect_retry(req);
+     ret = sss_failover_transaction_send(state, params->ev, id_ctx->gc_fctx, req,
+                                         ad_get_account_domain_connect_done);
     if (ret != EOK) {
-        DEBUG(SSSDBG_OP_FAILURE, "Connection error");
         goto immediately;
     }
 
@@ -706,33 +698,20 @@ static errno_t ad_get_account_domain_prepare_search(struct tevent_req *req)
     return EOK;
 }
 
-static errno_t ad_get_account_domain_connect_retry(struct tevent_req *req)
-{
-    struct ad_get_account_domain_state *state = tevent_req_data(req,
-                                          struct ad_get_account_domain_state);
-    struct tevent_req *subreq;
-    errno_t ret;
-
-    subreq = sdap_id_op_connect_send(state->op, state, &ret);
-    if (subreq == NULL) {
-        return ENOMEM;
-    }
-
-    tevent_req_set_callback(subreq, ad_get_account_domain_connect_done, req);
-    return ret;
-}
-
 static void ad_get_account_domain_connect_done(struct tevent_req *subreq)
 {
     struct tevent_req *req = tevent_req_callback_data(subreq,
                                                       struct tevent_req);
-    errno_t ret;
+    struct ad_get_account_domain_state *state = tevent_req_data(subreq,
+                                          struct ad_get_account_domain_state);
 
-    ret = sdap_id_op_connect_recv(subreq);
+    state->conn = sss_failover_transaction_connected_recv(state, subreq,
+                                        struct sss_failover_ldap_connection);
     talloc_zfree(subreq);
 
-    if (ret != EOK) {
-        tevent_req_error(req, ret);
+    if (state->conn == NULL) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "Bug: No connection?\n");
+        tevent_req_error(req, EINVAL);
         return;
     }
 
@@ -754,7 +733,7 @@ static void ad_get_account_domain_search(struct tevent_req *req)
     }
 
     subreq = sdap_get_generic_send(state, state->ev, state->sdap_id_ctx->opts,
-                                   sdap_id_op_handle(state->op),
+                                   state->conn->sh,
                                    "",
                                    LDAP_SCOPE_SUBTREE,
                                    state->filter,
