@@ -860,7 +860,7 @@ static void sdap_id_op_connect_done(struct tevent_req *subreq)
             sdap_id_op_connect_req_complete(op, ret);
         } else if (is_offline) {
             DEBUG(SSSDBG_TRACE_ALL, "notify offline to op #%d\n", notify_count);
-            sdap_id_op_connect_req_complete(op, EAGAIN);
+            sdap_id_op_connect_req_complete(op, ERR_OFFLINE);
         } else {
             DEBUG(SSSDBG_TRACE_ALL,
                   "notify error to op #%d: %d [%s]\n", notify_count, ret, strerror(ret));
@@ -956,7 +956,7 @@ static void sdap_id_op_connect_req_complete(struct sdap_id_op *op, int ret)
  *
  * In data provider error code is returned:
  *   ERR_OK - connection established
- *   ERR_OFFLINE - backend is offline, operation result is set EAGAIN
+ *   ERR_OFFLINE - backend is offline
  *   ERR_SERVER_FAILURE - operation failed
  */
 int sdap_id_op_connect_recv(struct tevent_req *req)
@@ -1005,7 +1005,7 @@ int sdap_id_op_done(struct sdap_id_op *op, int retval)
         op->reconnect_retry_count = 0;
     } else if (be_is_offline(op->conn_cache->id_conn->id_ctx->be)) {
         /* if backend is already offline, just report offline, do not duplicate errors */
-        retval = EAGAIN;
+        retval = ERR_OFFLINE;
         op->reconnect_retry_count = 0;
         DEBUG(SSSDBG_TRACE_ALL, "falling back to offline data...\n");
     } else if (communication_error) {
