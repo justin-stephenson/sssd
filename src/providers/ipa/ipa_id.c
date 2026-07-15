@@ -1485,12 +1485,10 @@ immediately:
 
 static void ipa_account_info_handler_done(struct tevent_req *subreq)
 {
-    struct ipa_account_info_handler_state *state;
     struct tevent_req *req;
     errno_t ret = ERR_INTERNAL;
 
     req = tevent_req_callback_data(subreq, struct tevent_req);
-    state = tevent_req_data(req, struct ipa_account_info_handler_state);
 
     ret = ipa_account_info_recv(subreq);
     talloc_zfree(subreq);

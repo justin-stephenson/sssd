@@ -66,7 +66,6 @@ struct dp_resolver_data {
 /* Reply private data. */
 
 struct dp_reply_std {
-    int error;
     const char *message;
 };
 

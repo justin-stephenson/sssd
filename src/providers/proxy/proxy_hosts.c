@@ -677,7 +677,7 @@ done:
     return ret;
 }
 
-static struct errno_t
+static errno_t
 proxy_hosts_info(TALLOC_CTX *mem_ctx,
                  struct proxy_resolver_ctx *ctx,
                  struct dp_resolver_data *data,
@@ -743,7 +743,6 @@ proxy_hosts_handler_send(TALLOC_CTX *mem_ctx,
 
     ret = proxy_hosts_info(state, resolver_ctx, resolver_data,
                            params->be_ctx, params->be_ctx->domain);
-
     if (ret != EOK) {
         tevent_req_error(req, ret);
     } else {

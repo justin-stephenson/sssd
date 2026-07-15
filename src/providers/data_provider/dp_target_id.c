@@ -434,11 +434,6 @@ static void dp_req_initgr_pp_set_initgr_timestamp(struct dp_initgr_ctx *ctx,
 {
     errno_t ret;
 
-    if (reply->error != EOK) {
-        /* Only bump the timestamp on successful lookups */
-        return;
-    }
-
     ret = sysdb_set_initgr_expire_timestamp(ctx->domain_info,
                                             ctx->filter_value);
     if (ret != EOK) {

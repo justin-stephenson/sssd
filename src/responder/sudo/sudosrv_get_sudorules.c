@@ -674,7 +674,7 @@ static void sudosrv_refresh_rules_done(struct tevent_req *subreq)
         DEBUG(SSSDBG_CRIT_FAILURE, "Unable to refresh rules [%d]: %s\n",
               ret, sss_strerror(ret));
         goto done;
-    } else if (err == ENOENT) {
+    } else if (ret == ENOENT) {
         DEBUG(SSSDBG_TRACE_INTERNAL,
               "Some expired rules were removed from the server, scheduling "
               "full refresh out of band\n");
@@ -689,12 +689,12 @@ static void sudosrv_refresh_rules_done(struct tevent_req *subreq)
         }
 
         tevent_req_set_callback(subreq, sudosrv_dp_oob_req_done, NULL);
-    } else if (err != 0) {
+    } else if (ret != 0) {
         DEBUG(SSSDBG_CRIT_FAILURE,
               "Unable to get information from Data Provider, "
               "Error: %u, %s\n",
-              (unsigned int)err,
-              sss_strerror(err));
+              (unsigned int)ret,
+              sss_strerror(ret));
         goto done;
     }
 

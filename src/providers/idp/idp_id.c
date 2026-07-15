@@ -622,13 +622,11 @@ immediately:
 
 static void idp_account_info_handler_done(struct tevent_req *subreq)
 {
-    struct idp_account_info_handler_state *state;
     struct tevent_req *req;
     const char *error_msg = NULL;
     errno_t ret;
 
     req = tevent_req_callback_data(subreq, struct tevent_req);
-    state = tevent_req_data(req, struct idp_account_info_handler_state);
 
     ret = idp_handle_acct_req_recv(subreq, &error_msg, NULL);
     talloc_zfree(subreq);

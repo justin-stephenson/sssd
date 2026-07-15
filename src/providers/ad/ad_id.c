@@ -511,13 +511,11 @@ immediately:
 
 static void ad_account_info_handler_done(struct tevent_req *subreq)
 {
-    struct ad_account_info_handler_state *state;
     struct tevent_req *req;
     const char *err_msg;
     errno_t ret;
 
     req = tevent_req_callback_data(subreq, struct tevent_req);
-    state = tevent_req_data(req, struct ad_account_info_handler_state);
 
     ret = ad_account_info_recv(subreq, &err_msg);
     talloc_zfree(subreq);
@@ -621,12 +619,12 @@ ad_get_account_domain_send(TALLOC_CTX *mem_ctx,
             DEBUG(SSSDBG_TRACE_INTERNAL,
                   "SID %s does not fit into any domain\n", data->filter_value);
             ret = ERR_NOT_FOUND;
-            goto immediately
+            goto immediately;
         } else {
             DEBUG(SSSDBG_TRACE_INTERNAL,
                   "SID %s fits into domain %s\n", data->filter_value, domain->name);
             ret = EOK;
-            goto immediately
+            goto immediately;
         }
     }
 

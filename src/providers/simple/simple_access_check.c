@@ -363,16 +363,10 @@ static void simple_resolve_group_done(struct tevent_req *subreq)
 
     ret = dp_req_recv_ptr(state, subreq, struct dp_reply_std, &reply);
     talloc_zfree(subreq);
-    if (ret) {
-        DEBUG(SSSDBG_OP_FAILURE, "dp_req_recv failed\n");
-        tevent_req_error(req, ret);
-        return;
-    }
-
-    if (reply->error != EOK) {
+    if (ret != EOK) {
         DEBUG(SSSDBG_MINOR_FAILURE,
               "Cannot refresh data from DP: %u: %s\n",
-              reply->error, reply->message);
+              ret, sss_strerror(ret));
         tevent_req_error(req, EIO);
         return;
     }

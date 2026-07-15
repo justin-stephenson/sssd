@@ -320,12 +320,10 @@ immediately:
 
 static void sdap_ip_host_handler_done(struct tevent_req *subreq)
 {
-    struct sdap_ip_host_handler_state *state;
     struct tevent_req *req;
     errno_t ret;
 
     req = tevent_req_callback_data(subreq, struct tevent_req);
-    state = tevent_req_data(req, struct sdap_ip_host_handler_state);
 
     ret = sdap_ip_host_get_recv(subreq);
     talloc_zfree(subreq);
