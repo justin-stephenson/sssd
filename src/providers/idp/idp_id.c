@@ -574,7 +574,7 @@ idp_handle_acct_req_recv(struct tevent_req *req,
 }
 
 struct idp_account_info_handler_state {
-    struct dp_reply_std reply;
+    int dummy;
 };
 
 static void idp_account_info_handler_done(struct tevent_req *subreq);
@@ -640,15 +640,9 @@ static void idp_account_info_handler_done(struct tevent_req *subreq)
 
 errno_t idp_account_info_handler_recv(TALLOC_CTX *mem_ctx,
                                       struct tevent_req *req,
-                                      struct dp_reply_std *data)
+                                      dp_no_output *_no_output)
 {
-    struct idp_account_info_handler_state *state = NULL;
-
-    state = tevent_req_data(req, struct idp_account_info_handler_state);
-
     TEVENT_REQ_RETURN_ON_ERROR(req);
-
-    *data = state->reply;
 
     return EOK;
 }

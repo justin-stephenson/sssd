@@ -1434,7 +1434,6 @@ errno_t ipa_account_info_recv(struct tevent_req *req)
 }
 
 struct ipa_account_info_handler_state {
-    struct dp_reply_std reply;
 };
 
 static void ipa_account_info_handler_done(struct tevent_req *subreq);
@@ -1502,15 +1501,9 @@ static void ipa_account_info_handler_done(struct tevent_req *subreq)
 
 errno_t ipa_account_info_handler_recv(TALLOC_CTX *mem_ctx,
                                       struct tevent_req *req,
-                                      struct dp_reply_std *data)
+                                      dp_no_output *_no_output)
 {
-    struct ipa_account_info_handler_state *state = NULL;
-
-    state = tevent_req_data(req, struct ipa_account_info_handler_state);
-
     TEVENT_REQ_RETURN_ON_ERROR(req);
-
-    *data = state->reply;
 
     return EOK;
 }

@@ -329,14 +329,13 @@ static void check_if_online_delayed(struct tevent_context *ev,
 static void be_check_online_done(struct tevent_req *req)
 {
     struct be_ctx *be_ctx;
-    struct dp_reply_std *reply;
     struct tevent_timer *time_event;
     struct timeval schedule;
     errno_t ret;
 
     be_ctx = tevent_req_callback_data(req, struct be_ctx);
 
-    ret = dp_req_recv_ptr(be_ctx, req, struct dp_reply_std, &reply);
+    ret = dp_req_recv_no_output(req);
     talloc_zfree(req);
     switch (ret) {
     case EOK:
@@ -385,7 +384,7 @@ static void be_check_online_done(struct tevent_req *req)
 
 done:
     be_ctx->check_online_ref_count = 0;
-    if (reply && ret != ERR_OFFLINE) {
+    if (ret != ERR_OFFLINE) {
         if (ret != EOK) {
             reset_fo(be_ctx);
         }

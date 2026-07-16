@@ -459,7 +459,6 @@ errno_t ad_account_info_recv(struct tevent_req *req,
 
 struct ad_account_info_handler_state {
     struct sss_domain_info *domain;
-    struct dp_reply_std reply;
 };
 
 static void ad_account_info_handler_done(struct tevent_req *subreq);
@@ -529,15 +528,9 @@ static void ad_account_info_handler_done(struct tevent_req *subreq)
 
 errno_t ad_account_info_handler_recv(TALLOC_CTX *mem_ctx,
                                      struct tevent_req *req,
-                                     struct dp_reply_std *data)
+                                     dp_no_output *_no_output)
 {
-    struct ad_account_info_handler_state *state = NULL;
-
-    state = tevent_req_data(req, struct ad_account_info_handler_state);
-
     TEVENT_REQ_RETURN_ON_ERROR(req);
-
-    *data = state->reply;
 
     return EOK;
 }
@@ -565,7 +558,6 @@ struct ad_get_account_domain_state {
     const char *base_filter;
     char *filter;
     const char **attrs;
-    struct dp_reply_std reply;
     struct sdap_id_op *op;
     struct sysdb_attrs **objects;
     size_t count;
@@ -942,15 +934,9 @@ static void ad_get_account_domain_evaluate(struct tevent_req *req)
 
 errno_t ad_get_account_domain_recv(TALLOC_CTX *mem_ctx,
                                    struct tevent_req *req,
-                                   struct dp_reply_std *data)
+                                   dp_no_output *_no_output)
 {
-    struct ad_get_account_domain_state *state = NULL;
-
-    state = tevent_req_data(req, struct ad_get_account_domain_state);
-
     TEVENT_REQ_RETURN_ON_ERROR(req);
-
-    *data = state->reply;
 
     return EOK;
 }
