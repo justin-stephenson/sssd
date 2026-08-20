@@ -1,0 +1,14 @@
+services:
+  test:
+    restart: always
+    image: registry.fedoraproject.org/fedora
+    container_name: testcontainer
+    cap_add:
+    - NET_RAW
+    - NET_ADMIN
+    - SYS_CHROOT
+    security_opt:
+    - apparmor=unconfined
+    - label=disable
+    - seccomp=unconfined
+    command: tail -f /dev/null
