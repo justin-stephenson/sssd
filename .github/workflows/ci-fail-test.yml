@@ -1,0 +1,34 @@
+name: "ci"
+on:
+  pull_request:
+jobs:
+  fedora-container:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install podman
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y podman
+
+    - name: Start podman socket
+      shell: bash
+      run: |
+        sudo systemctl enable podman.socket
+        sudo systemctl restart podman.socket
+
+    - name: Create Fedora container
+      env:
+        DOCKER_HOST: unix:///run/podman/podman.sock
+      run: |
+        sudo podman pull registry.fedoraproject.org/fedora
+        sudo podman run --name fedora-build -d registry.fedoraproject.org/fedora sleep infinity
+
+    - name: Verify container is running
+      run: |
+        sudo podman ps
+
+    - name: Reproduce hanging command
+      run: |
+        for i in {1..5}; do
+          sudo podman exec fedora-build whoami
+        done
