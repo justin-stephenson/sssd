@@ -116,11 +116,13 @@ export TESTING_FARM_API_TOKEN=<your-token>
 Run from a checkout of the branch you want tested. The branch must be pushed to
 a remote reachable by Testing Farm (e.g. your fork) -- it clones `url`/`ref` on
 its own infrastructure, it does not see your local working tree. Uncommitted or
-unpushed changes are not tested.
+unpushed changes are not tested. The `-e` environment variables must be provided.
 
 ```
 git checkout <branch>
-testing-farm request --compose Fedora-latest --git-url https://github.com/SSSD/sssd.git --git-ref master
+testing-farm request --compose Fedora-latest --git-url https://github.com/SSSD/sssd.git \
+--git-ref master -e PACKIT_COPR_PROJECT=@sssd/nightly -e PACKIT_COPR_RPMS='sssd*' \
+-e TAG=fedora-latest
 ```
 
 To request a run using specific COPR repository, sssd-ci-container image, or
